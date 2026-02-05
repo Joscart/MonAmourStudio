@@ -1,4 +1,4 @@
-# Multi-stage build for Next.js (React + Tailwind) static export served by Nginx
+# Multi-stage build for Next.js (App Router) served by Next standalone server
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -31,9 +31,24 @@ ENV NEXT_PUBLIC_API_BASE_DELIVERIES=${API_BASE_DELIVERIES}
 ENV NEXT_PUBLIC_API_BASE_CAMPAIGNS=${API_BASE_CAMPAIGNS}
 
 RUN pnpm install --frozen-lockfile
-RUN pnpm run build && pnpm exec next export -o out
+RUN pnpm run build
 
-FROM nginx:alpine AS runner
-COPY --from=builder /app/out /usr/share/nginx/html
-EXPOSE 80
-HEALTHCHECK CMD wget -qO- http://localhost || exit 1
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Carry over public assets and standalone server
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# Re-expose runtime env (also baked at build time)
+ENV NEXT_PUBLIC_API_BASE_USERS=${API_BASE_USERS}
+ENV NEXT_PUBLIC_API_BASE_INVENTORY=${API_BASE_INVENTORY}
+ENV NEXT_PUBLIC_API_BASE_ORDERS=${API_BASE_ORDERS}
+ENV NEXT_PUBLIC_API_BASE_DELIVERIES=${API_BASE_DELIVERIES}
+ENV NEXT_PUBLIC_API_BASE_CAMPAIGNS=${API_BASE_CAMPAIGNS}
+
+EXPOSE 3000
+HEALTHCHECK CMD wget -qO- http://localhost:3000 || exit 1
+CMD ["node", "server.js"]
