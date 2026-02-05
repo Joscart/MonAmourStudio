@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+asyncpg
+SQLAlchemy
+pydantic
+python-multipart
+boto3
+aioredis
+httpx

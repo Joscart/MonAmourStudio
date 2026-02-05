@@ -1,0 +1,301 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: ./front-end
+      dockerfile: Dockerfile
+      args:
+        API_BASE_USERS: ${API_BASE_USERS:-http://usuarios:8000}
+        API_BASE_INVENTORY: ${API_BASE_INVENTORY:-http://inventario:8000}
+        API_BASE_ORDERS: ${API_BASE_ORDERS:-http://pedidos:8000}
+        API_BASE_DELIVERIES: ${API_BASE_DELIVERIES:-http://entregas:8000}
+        API_BASE_CAMPAIGNS: ${API_BASE_CAMPAIGNS:-http://campanas:8000}
+    image: frontend:local
+    container_name: frontend
+    depends_on:
+      - usuarios
+    environment:
+      API_BASE_USERS: ${API_BASE_USERS:-http://usuarios:8000}
+      API_BASE_INVENTORY: ${API_BASE_INVENTORY:-http://inventario:8000}
+      API_BASE_ORDERS: ${API_BASE_ORDERS:-http://pedidos:8000}
+      API_BASE_DELIVERIES: ${API_BASE_DELIVERIES:-http://entregas:8000}
+      API_BASE_CAMPAIGNS: ${API_BASE_CAMPAIGNS:-http://campanas:8000}
+    ports:
+      - "8080:80"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_pass}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce_net
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  pg_users:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${USUARIOS_DB_USER:-usuarios_user}
+      POSTGRES_PASSWORD: ${USUARIOS_DB_PASSWORD:-usuarios_pass}
+      POSTGRES_DB: ${USUARIOS_DB_NAME:-usuarios_db}
+    volumes:
+      - pg_users_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg_inventory:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${INVENTARIO_DB_USER:-inventario_user}
+      POSTGRES_PASSWORD: ${INVENTARIO_DB_PASSWORD:-inventario_pass}
+      POSTGRES_DB: ${INVENTARIO_DB_NAME:-inventario_db}
+    volumes:
+      - pg_inventory_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg_orders:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${PEDIDOS_DB_USER:-pedidos_user}
+      POSTGRES_PASSWORD: ${PEDIDOS_DB_PASSWORD:-pedidos_pass}
+      POSTGRES_DB: ${PEDIDOS_DB_NAME:-pedidos_db}
+    volumes:
+      - pg_orders_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg_deliveries:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${ENTREGAS_DB_USER:-entregas_user}
+      POSTGRES_PASSWORD: ${ENTREGAS_DB_PASSWORD:-entregas_pass}
+      POSTGRES_DB: ${ENTREGAS_DB_NAME:-entregas_db}
+    volumes:
+      - pg_deliveries_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg_campaigns:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${CAMPANAS_DB_USER:-campanas_user}
+      POSTGRES_PASSWORD: ${CAMPANAS_DB_PASSWORD:-campanas_pass}
+      POSTGRES_DB: ${CAMPANAS_DB_NAME:-campanas_db}
+    volumes:
+      - pg_campaigns_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  usuarios:
+    build: ./back-end/usuarios
+    container_name: usuarios
+    environment:
+      APP_NAME: usuarios
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://${USUARIOS_DB_USER:-usuarios_user}:${USUARIOS_DB_PASSWORD:-usuarios_pass}@pg_users:5432/${USUARIOS_DB_NAME:-usuarios_db}
+      SECRET_KEY: ${USUARIOS_SECRET_KEY:-change_me}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: users
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379/0
+      SEED: ${USUARIOS_SEED:-false}
+    depends_on:
+      pg_users:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8001:8000"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  inventario:
+    build: ./back-end/inventario
+    container_name: inventario
+    environment:
+      APP_NAME: inventario
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://${INVENTARIO_DB_USER:-inventario_user}:${INVENTARIO_DB_PASSWORD:-inventario_pass}@pg_inventory:5432/${INVENTARIO_DB_NAME:-inventario_db}
+      SECRET_KEY: ${INVENTARIO_SECRET_KEY:-change_me}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: inventory
+      SEED: ${INVENTARIO_SEED:-false}
+    depends_on:
+      pg_inventory:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "8002:8000"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pedidos:
+    build: ./back-end/pedidos
+    container_name: pedidos
+    environment:
+      APP_NAME: pedidos
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://${PEDIDOS_DB_USER:-pedidos_user}:${PEDIDOS_DB_PASSWORD:-pedidos_pass}@pg_orders:5432/${PEDIDOS_DB_NAME:-pedidos_db}
+      SECRET_KEY: ${PEDIDOS_SECRET_KEY:-change_me}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: orders
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379/1
+      PAYPHONE_HMAC_SECRET: ${PAYPHONE_HMAC_SECRET:-replace_me}
+      SEED: ${PEDIDOS_SEED:-false}
+    depends_on:
+      pg_orders:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8003:8000"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  entregas:
+    build: ./back-end/entregas
+    container_name: entregas
+    environment:
+      APP_NAME: entregas
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://${ENTREGAS_DB_USER:-entregas_user}:${ENTREGAS_DB_PASSWORD:-entregas_pass}@pg_deliveries:5432/${ENTREGAS_DB_NAME:-entregas_db}
+      SECRET_KEY: ${ENTREGAS_SECRET_KEY:-change_me}
+      SEED: ${ENTREGAS_SEED:-false}
+    depends_on:
+      pg_deliveries:
+        condition: service_healthy
+    ports:
+      - "8004:8000"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  campanas:
+    build: ./back-end/campanas
+    container_name: campanas
+    environment:
+      APP_NAME: campanas
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://${CAMPANAS_DB_USER:-campanas_user}:${CAMPANAS_DB_PASSWORD:-campanas_pass}@pg_campaigns:5432/${CAMPANAS_DB_NAME:-campanas_db}
+      SECRET_KEY: ${CAMPANAS_SECRET_KEY:-change_me}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: campaigns
+      SEED: ${CAMPANAS_SEED:-false}
+    depends_on:
+      pg_campaigns:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "8005:8000"
+    networks:
+      - ecommerce_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  ecommerce_net:
+    driver: bridge
+
+volumes:
+  pg_users_data:
+  pg_inventory_data:
+  pg_orders_data:
+  pg_deliveries_data:
+  pg_campaigns_data:
+  minio_data:
+  redis_data:
