@@ -103,6 +103,17 @@ export const usersApi = {
   deleteUser(userId: string) {
     return request<void>(`/api/users/${userId}`, { method: "DELETE" })
   },
+
+  getUser(userId: string) {
+    return request<UsuarioResponse>(`/api/users/${userId}`)
+  },
+
+  updateRole(userId: string, rol: string) {
+    return request<UsuarioResponse>(`/api/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ rol }),
+    })
+  },
 }
 
 /* ── Inventario ──────────────────────────────────────────── */

@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Edit2,
   Loader2,
+  ShieldCheck,
 } from "lucide-react"
 
 const menuItems = [
@@ -176,6 +177,7 @@ export default function AccountPage() {
             <div className="lg:col-span-3">
               {/* Profile Section */}
               {activeSection === "perfil" && (
+                <>
                 <div className="bg-card rounded-lg border border-border p-6">
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="font-serif text-xl text-foreground">Informacion Personal</h2>
@@ -230,6 +232,26 @@ export default function AccountPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Admin Panel Access – solo visible para administradores */}
+                {user.rol === "admin" && (
+                  <Link
+                    href="/dashboard"
+                    className="mt-4 flex items-center justify-between bg-card rounded-lg border border-border p-5 hover:border-primary/50 hover:bg-primary/5 transition-colors group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                        <ShieldCheck className="h-5 w-5 text-purple-700" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">Administrar</p>
+                        <p className="text-sm text-muted-foreground">Panel de administracion de la tienda</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </Link>
+                )}
+                </>
               )}
 
               {/* Orders Section */}

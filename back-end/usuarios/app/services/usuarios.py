@@ -54,10 +54,16 @@ class UsuarioService:
                 detail="El correo ya está registrado",
             )
 
+        # Auto-promote to admin if email matches ADMIN_EMAIL
+        rol = "cliente"
+        if settings.ADMIN_EMAIL and data.email.lower() == settings.ADMIN_EMAIL.lower():
+            rol = "admin"
+
         usuario = Usuario(
             nombre=data.nombre,
             email=data.email,
             password_hash=self._hash_password(data.password),
+            rol=rol,
         )
         usuario = await self.repo.create(db, usuario)
 
@@ -104,6 +110,11 @@ class UsuarioService:
 
     async def list_users(self, db: AsyncSession) -> list[Usuario]:
         return await self.repo.list_all(db)
+
+    async def update_role(
+        self, db: AsyncSession, user_id: uuid.UUID, new_role: str
+    ) -> Optional[Usuario]:
+        return await self.repo.update(db, user_id, {"rol": new_role})
 
     async def delete_user(self, db: AsyncSession, user_id: uuid.UUID) -> bool:
         return await self.repo.delete(db, user_id)

@@ -6,23 +6,28 @@ version: "3.9"
 # ──────────────────────────────────────────────────────────────
 
 x-common-env: &common-env
-  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-  OTLP_ENDPOINT: http://jaeger:4317
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+  OTLP_ENDPOINT: ${OTLP_ENDPOINT:-http://jaeger:4317}
   MINIO_ENDPOINT: minio:9000
-  MINIO_ACCESS_KEY: minioadmin
-  MINIO_SECRET_KEY: minioadmin
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
 
 services:
-  # ── Traefik (Reverse Proxy + Web UI) ─────────────────────────
+  # ── Traefik (Reverse Proxy + Web UI + TLS) ─────────────────
   traefik:
     image: traefik:v3.1
     container_name: traefik
     ports:
-      - "80:80"       # HTTP entrypoint
-      - "8080:8080"   # Dashboard / Web UI
+      - "80:80"        # HTTP (redirige a HTTPS)
+      - "443:443"      # HTTPS
+      - "8080:8080"    # Dashboard / Web UI
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - acme_data:/acme
     networks:
       - ecommerce_net
     restart: unless-stopped
@@ -43,8 +48,10 @@ services:
       - "traefik.enable=true"
       # Catch-all rule: todo lo que NO sea /api/* va al frontend
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.entrypoints=web,websecure"
       - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
     networks:
       - ecommerce_net
@@ -58,16 +65,19 @@ services:
     container_name: usuarios
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-usuarios:5432/usuarios
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-usuarios:5432/usuarios
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MINIO_BUCKET: users
-      JWT_SECRET: super-secret-key-change-in-production
+      JWT_SECRET: ${JWT_SECRET:-super-secret-key-change-in-production}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-joscartinicioegc@gmail.com}
       SERVICE_NAME: usuarios
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.usuarios.rule=PathPrefix(`/api/users/`)"
-      - "traefik.http.routers.usuarios.entrypoints=web"
+      - "traefik.http.routers.usuarios.entrypoints=web,websecure"
       - "traefik.http.routers.usuarios.priority=10"
+      - "traefik.http.routers.usuarios.tls=true"
+      - "traefik.http.routers.usuarios.tls.certresolver=letsencrypt"
       - "traefik.http.routers.usuarios.middlewares=usuarios-strip,usuarios-addprefix"
       - "traefik.http.middlewares.usuarios-strip.stripprefix.prefixes=/api/users"
       - "traefik.http.middlewares.usuarios-addprefix.addprefix.prefix=/usuarios"
@@ -91,15 +101,17 @@ services:
     container_name: inventario
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-inventario:5432/inventario
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-inventario:5432/inventario
       MINIO_BUCKET: inventory
       SERVICE_NAME: inventario
       GRPC_PORT: "50052"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.inventario.rule=PathPrefix(`/api/inventory/`)"
-      - "traefik.http.routers.inventario.entrypoints=web"
+      - "traefik.http.routers.inventario.entrypoints=web,websecure"
       - "traefik.http.routers.inventario.priority=10"
+      - "traefik.http.routers.inventario.tls=true"
+      - "traefik.http.routers.inventario.tls.certresolver=letsencrypt"
       - "traefik.http.routers.inventario.middlewares=inventario-strip,inventario-addprefix"
       - "traefik.http.middlewares.inventario-strip.stripprefix.prefixes=/api/inventory"
       - "traefik.http.middlewares.inventario-addprefix.addprefix.prefix=/productos"
@@ -121,15 +133,17 @@ services:
     container_name: pedidos
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-pedidos:5432/pedidos
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-pedidos:5432/pedidos
       MINIO_BUCKET: orders
-      JWT_SECRET: super-secret-key-change-in-production
+      JWT_SECRET: ${JWT_SECRET:-super-secret-key-change-in-production}
       SERVICE_NAME: pedidos
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.pedidos.rule=PathPrefix(`/api/orders/`)"
-      - "traefik.http.routers.pedidos.entrypoints=web"
+      - "traefik.http.routers.pedidos.entrypoints=web,websecure"
       - "traefik.http.routers.pedidos.priority=10"
+      - "traefik.http.routers.pedidos.tls=true"
+      - "traefik.http.routers.pedidos.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pedidos.middlewares=pedidos-strip,pedidos-addprefix"
       - "traefik.http.middlewares.pedidos-strip.stripprefix.prefixes=/api/orders"
       - "traefik.http.middlewares.pedidos-addprefix.addprefix.prefix=/pedidos"
@@ -151,15 +165,17 @@ services:
     container_name: entregas
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-entregas:5432/entregas
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-entregas:5432/entregas
       MINIO_BUCKET: deliveries
       SERVICE_NAME: entregas
       GRPC_PORT: "50054"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.entregas.rule=PathPrefix(`/api/deliveries/`)"
-      - "traefik.http.routers.entregas.entrypoints=web"
+      - "traefik.http.routers.entregas.entrypoints=web,websecure"
       - "traefik.http.routers.entregas.priority=10"
+      - "traefik.http.routers.entregas.tls=true"
+      - "traefik.http.routers.entregas.tls.certresolver=letsencrypt"
       - "traefik.http.routers.entregas.middlewares=entregas-strip,entregas-addprefix"
       - "traefik.http.middlewares.entregas-strip.stripprefix.prefixes=/api/deliveries"
       - "traefik.http.middlewares.entregas-addprefix.addprefix.prefix=/entregas"
@@ -181,22 +197,26 @@ services:
     container_name: campanas
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-campanas:5432/campanas
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-campanas:5432/campanas
       MINIO_BUCKET: campaigns
       SERVICE_NAME: campanas
     labels:
       - "traefik.enable=true"
       # Router 1: /api/campaigns/ → /campanas/
       - "traefik.http.routers.campanas.rule=PathPrefix(`/api/campaigns/`)"
-      - "traefik.http.routers.campanas.entrypoints=web"
+      - "traefik.http.routers.campanas.entrypoints=web,websecure"
       - "traefik.http.routers.campanas.priority=10"
+      - "traefik.http.routers.campanas.tls=true"
+      - "traefik.http.routers.campanas.tls.certresolver=letsencrypt"
       - "traefik.http.routers.campanas.middlewares=campanas-strip,campanas-addprefix"
       - "traefik.http.middlewares.campanas-strip.stripprefix.prefixes=/api/campaigns"
       - "traefik.http.middlewares.campanas-addprefix.addprefix.prefix=/campanas"
       # Router 2: /api/publications/ → /publicaciones/
       - "traefik.http.routers.publicaciones.rule=PathPrefix(`/api/publications/`)"
-      - "traefik.http.routers.publicaciones.entrypoints=web"
+      - "traefik.http.routers.publicaciones.entrypoints=web,websecure"
       - "traefik.http.routers.publicaciones.priority=10"
+      - "traefik.http.routers.publicaciones.tls=true"
+      - "traefik.http.routers.publicaciones.tls.certresolver=letsencrypt"
       - "traefik.http.routers.publicaciones.middlewares=pub-strip,pub-addprefix"
       - "traefik.http.middlewares.pub-strip.stripprefix.prefixes=/api/publications"
       - "traefik.http.middlewares.pub-addprefix.addprefix.prefix=/publicaciones"
@@ -216,8 +236,8 @@ services:
     container_name: postgres-usuarios
     environment:
       POSTGRES_DB: usuarios
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pg_usuarios_data:/var/lib/postgresql/data
       - ../back-end/usuarios/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
@@ -235,8 +255,8 @@ services:
     container_name: postgres-inventario
     environment:
       POSTGRES_DB: inventario
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pg_inventario_data:/var/lib/postgresql/data
       - ../back-end/inventario/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
@@ -254,8 +274,8 @@ services:
     container_name: postgres-pedidos
     environment:
       POSTGRES_DB: pedidos
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pg_pedidos_data:/var/lib/postgresql/data
       - ../back-end/pedidos/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
@@ -273,8 +293,8 @@ services:
     container_name: postgres-entregas
     environment:
       POSTGRES_DB: entregas
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pg_entregas_data:/var/lib/postgresql/data
       - ../back-end/entregas/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
@@ -292,8 +312,8 @@ services:
     container_name: postgres-campanas
     environment:
       POSTGRES_DB: campanas
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pg_campanas_data:/var/lib/postgresql/data
       - ../back-end/campanas/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
@@ -322,8 +342,8 @@ services:
     container_name: minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     volumes:
       - minio_data:/data
     networks:
@@ -335,10 +355,13 @@ services:
     container_name: minio-init
     depends_on:
       - minio
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
     entrypoint: >
       /bin/sh -c "
         sleep 5;
-        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc alias set local http://minio:9000 $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY};
         mc mb --ignore-existing local/users;
         mc mb --ignore-existing local/inventory;
         mc mb --ignore-existing local/orders;
@@ -391,8 +414,8 @@ services:
     image: grafana/grafana:11.1.0
     container_name: grafana
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
@@ -420,6 +443,7 @@ networks:
 
 # ── Volúmenes ─────────────────────────────────────────────────
 volumes:
+  acme_data:
   pg_usuarios_data:
   pg_inventario_data:
   pg_pedidos_data:

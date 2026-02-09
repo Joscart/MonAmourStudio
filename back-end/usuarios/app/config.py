@@ -18,7 +18,8 @@ class Settings(BaseSettings):
 
     # ── Kafka ─────────────────────────────────────────────────────────
     KAFKA_BOOTSTRAP_SERVERS: str = "kafka:9092"
-
+    # ── Admin ─────────────────────────────────────────────────────
+    ADMIN_EMAIL: str = ""
     # ── JWT ───────────────────────────────────────────────────────────
     JWT_SECRET: str = "super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"

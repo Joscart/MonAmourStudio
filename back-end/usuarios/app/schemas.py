@@ -24,6 +24,10 @@ class UsuarioUpdate(BaseModel):
     email: Optional[EmailStr] = None
 
 
+class RoleUpdate(BaseModel):
+    rol: str = Field(..., pattern=r"^(admin|cliente|vendedor)$")
+
+
 # ── Response Schemas ──────────────────────────────────────────────────────────
 
 

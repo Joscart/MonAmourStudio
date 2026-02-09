@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.schemas import (
+    RoleUpdate,
     TokenResponse,
     UsuarioCreate,
     UsuarioLogin,
@@ -117,6 +118,33 @@ async def list_users(
 ):
     """List all users (admin only)."""
     return await service.list_users(db)
+
+
+@router.get("/{user_id}", response_model=UsuarioResponse)
+async def get_user(
+    user_id: uuid.UUID,
+    _admin: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific user by ID (admin only)."""
+    user = await service.get_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+    return user
+
+
+@router.patch("/{user_id}/role", response_model=UsuarioResponse)
+async def update_user_role(
+    user_id: uuid.UUID,
+    data: RoleUpdate,
+    _admin: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a user's role (admin only)."""
+    user = await service.update_role(db, user_id, data.rol)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+    return user
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

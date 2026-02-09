@@ -29,6 +29,9 @@ import {
   BarChart3,
   Calendar,
   Loader2,
+  Shield,
+  ShieldCheck,
+  X as XIcon,
 } from "lucide-react"
 
 const menuItems = [
@@ -50,6 +53,8 @@ export default function AdminDashboard() {
   const [products, setProducts] = useState<ProductoResponse[]>([])
   const [orders, setOrders] = useState<PedidoResponse[]>([])
   const [customers, setCustomers] = useState<UsuarioResponse[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<UsuarioResponse | null>(null)
+  const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -99,6 +104,34 @@ export default function AdminDashboard() {
   }
 
   const totalRevenue = orders.reduce((s, o) => s + o.total, 0)
+
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    setRoleUpdating(userId)
+    try {
+      const updated = await usersApi.updateRole(userId, newRole)
+      setCustomers((prev) =>
+        prev.map((c) => (c.id === userId ? { ...c, rol: updated.rol } : c)),
+      )
+      if (selectedCustomer?.id === userId) {
+        setSelectedCustomer((prev) => (prev ? { ...prev, rol: updated.rol } : prev))
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setRoleUpdating(null)
+    }
+  }
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("¿Seguro que deseas eliminar este usuario? Esta acción es irreversible.")) return
+    try {
+      await usersApi.deleteUser(userId)
+      setCustomers((prev) => prev.filter((c) => c.id !== userId))
+      if (selectedCustomer?.id === userId) setSelectedCustomer(null)
+    } catch {
+      // silently fail
+    }
+  }
   const pendingOrders = orders.filter((o) =>
     ["pendiente", "confirmado", "procesando"].includes(o.estado),
   ).length
@@ -493,44 +526,162 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="bg-card rounded-lg border border-border overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-secondary/50">
-                          <tr>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Cliente</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Rol</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Registro</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {customers.map((customer) => (
-                            <tr key={customer.id} className="hover:bg-secondary/30 transition-colors">
-                              <td className="px-5 py-4">
-                                <p className="text-sm font-medium text-foreground">{customer.nombre}</p>
-                                <p className="text-xs text-muted-foreground">{customer.email}</p>
-                              </td>
-                              <td className="px-5 py-4 text-sm text-foreground capitalize">{customer.rol}</td>
-                              <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(customer.created_at)}</td>
-                              <td className="px-5 py-4">
-                                <Button variant="outline" size="sm" className="bg-transparent">
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  Ver Perfil
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                          {customers.length === 0 && (
+                  <div className="grid lg:grid-cols-3 gap-6">
+                    {/* User Table */}
+                    <div className={`${selectedCustomer ? "lg:col-span-2" : "lg:col-span-3"} bg-card rounded-lg border border-border overflow-hidden`}>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-secondary/50">
                             <tr>
-                              <td colSpan={4} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                                No hay clientes registrados.
-                              </td>
+                              <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Cliente</th>
+                              <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Rol</th>
+                              <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Registro</th>
+                              <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Acciones</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {customers.map((customer) => (
+                              <tr
+                                key={customer.id}
+                                className={`hover:bg-secondary/30 transition-colors cursor-pointer ${selectedCustomer?.id === customer.id ? "bg-secondary/40" : ""}`}
+                                onClick={() => setSelectedCustomer(customer)}
+                              >
+                                <td className="px-5 py-4">
+                                  <p className="text-sm font-medium text-foreground">{customer.nombre}</p>
+                                  <p className="text-xs text-muted-foreground">{customer.email}</p>
+                                </td>
+                                <td className="px-5 py-4">
+                                  <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                    <select
+                                      value={customer.rol}
+                                      onChange={(e) => handleRoleChange(customer.id, e.target.value)}
+                                      disabled={roleUpdating === customer.id}
+                                      className={`appearance-none text-xs font-medium px-3 py-1.5 pr-7 rounded-full border-0 focus:ring-2 focus:ring-primary cursor-pointer ${
+                                        customer.rol === "admin"
+                                          ? "bg-purple-100 text-purple-700"
+                                          : customer.rol === "vendedor"
+                                            ? "bg-blue-100 text-blue-700"
+                                            : "bg-gray-100 text-gray-700"
+                                      } ${roleUpdating === customer.id ? "opacity-50" : ""}`}
+                                    >
+                                      <option value="cliente">cliente</option>
+                                      <option value="vendedor">vendedor</option>
+                                      <option value="admin">admin</option>
+                                    </select>
+                                    <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none" />
+                                  </div>
+                                </td>
+                                <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(customer.created_at)}</td>
+                                <td className="px-5 py-4">
+                                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 bg-transparent"
+                                      onClick={() => setSelectedCustomer(customer)}
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 bg-transparent"
+                                      onClick={() => handleDeleteUser(customer.id)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {customers.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                  No hay clientes registrados.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
+
+                    {/* User Detail Sidebar */}
+                    {selectedCustomer && (
+                      <div className="lg:col-span-1 bg-card rounded-lg border border-border p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="font-medium text-foreground">Detalle del Usuario</h3>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCustomer(null)}
+                            className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="flex flex-col items-center mb-6">
+                          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-3">
+                            <span className="text-primary font-bold text-2xl">
+                              {selectedCustomer.nombre.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="font-medium text-foreground text-center">{selectedCustomer.nombre}</p>
+                          <p className="text-sm text-muted-foreground">{selectedCustomer.email}</p>
+                          <span className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                            selectedCustomer.rol === "admin"
+                              ? "bg-purple-100 text-purple-700"
+                              : selectedCustomer.rol === "vendedor"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-gray-100 text-gray-700"
+                          }`}>
+                            {selectedCustomer.rol === "admin" ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                            {selectedCustomer.rol}
+                          </span>
+                        </div>
+
+                        <div className="space-y-3 text-sm">
+                          <div className="flex justify-between py-2 border-b border-border">
+                            <span className="text-muted-foreground">ID</span>
+                            <span className="text-foreground font-mono text-xs">{selectedCustomer.id.slice(0, 12)}...</span>
+                          </div>
+                          <div className="flex justify-between py-2 border-b border-border">
+                            <span className="text-muted-foreground">Registro</span>
+                            <span className="text-foreground">{formatDate(selectedCustomer.created_at)}</span>
+                          </div>
+                          <div className="flex justify-between py-2 border-b border-border">
+                            <span className="text-muted-foreground">Rol</span>
+                            <span className="text-foreground capitalize">{selectedCustomer.rol}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-6 space-y-2">
+                          <label htmlFor="roleSelect" className="text-sm font-medium text-foreground">Cambiar Rol</label>
+                          <div className="flex gap-2">
+                            <select
+                              id="roleSelect"
+                              value={selectedCustomer.rol}
+                              onChange={(e) => handleRoleChange(selectedCustomer.id, e.target.value)}
+                              disabled={roleUpdating === selectedCustomer.id}
+                              className="flex-1 appearance-none bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="cliente">Cliente</option>
+                              <option value="vendedor">Vendedor</option>
+                              <option value="admin">Administrador</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full mt-4 text-destructive hover:bg-destructive/10 bg-transparent"
+                          onClick={() => handleDeleteUser(selectedCustomer.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Eliminar Usuario
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
