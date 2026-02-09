@@ -35,6 +35,10 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=6)
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., min_length=1)
+
+
 # ── Dirección Schemas ─────────────────────────────────────────────────────────
 
 

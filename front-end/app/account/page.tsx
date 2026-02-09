@@ -34,7 +34,11 @@ import {
   ChevronDown,
   Search,
   AlertTriangle,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react"
+import { useTheme } from "next-themes"
 
 /* ── Country codes for phone input ──────────────────────────── */
 const COUNTRIES = [
@@ -101,6 +105,47 @@ const menuItems = [
   { id: "pagos", label: "Metodos de Pago", icon: CreditCard },
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
+
+/* ── Theme Selector sub-component ──────────────────────────── */
+function ThemeSelector() {
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const options = [
+    { value: "light", label: "Claro", icon: Sun, desc: "Tema claro" },
+    { value: "dark", label: "Oscuro", icon: Moon, desc: "Tema oscuro" },
+    { value: "system", label: "Sistema", icon: Monitor, desc: "Segun tu dispositivo" },
+  ] as const
+
+  return (
+    <div className="py-4 border-b border-border">
+      <p className="font-medium text-foreground mb-1">Tema de la Pagina</p>
+      <p className="text-sm text-muted-foreground mb-4">Elige como se ve la pagina para ti</p>
+      <div className="grid grid-cols-3 gap-3">
+        {options.map((opt) => {
+          const Icon = opt.icon
+          const isActive = mounted && theme === opt.value
+          return (
+            <button
+              key={opt.value}
+              onClick={() => setTheme(opt.value)}
+              className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                isActive
+                  ? "border-primary bg-primary/5"
+                  : "border-border bg-secondary/30 hover:border-primary/40"
+              }`}
+            >
+              <Icon className={`h-5 w-5 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+              <span className={`text-sm font-medium ${isActive ? "text-primary" : "text-foreground"}`}>{opt.label}</span>
+              <span className="text-xs text-muted-foreground">{opt.desc}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function AccountPageInner() {
   const router = useRouter()
@@ -890,6 +935,9 @@ function AccountPageInner() {
                         <div className="w-11 h-6 bg-muted rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
                       </label>
                     </div>
+
+                    {/* Theme Selector */}
+                    <ThemeSelector />
 
                     {/* Password Change */}
                     <div className="py-4 border-b border-border">

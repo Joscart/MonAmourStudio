@@ -10,6 +10,7 @@ interface AuthState {
   isLoading: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
+  loginWithGoogle: (credential: string) => Promise<void>
   register: (nombre: string, email: string, password: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -48,6 +49,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(me)
   }, [])
 
+  const loginWithGoogle = useCallback(async (credential: string) => {
+    const res = await usersApi.googleAuth(credential)
+    localStorage.setItem("token", res.access_token)
+    setToken(res.access_token)
+    const me = await usersApi.getMe()
+    setUser(me)
+  }, [])
+
   const register = useCallback(async (nombre: string, email: string, password: string) => {
     await usersApi.register({ nombre, email, password })
     // auto-login after register
@@ -78,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!token && !!user,
         login,
+        loginWithGoogle,
         register,
         logout,
         refreshUser,

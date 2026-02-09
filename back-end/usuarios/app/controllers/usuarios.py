@@ -12,6 +12,7 @@ from app.schemas import (
     DireccionCreate,
     DireccionResponse,
     DireccionUpdate,
+    GoogleAuthRequest,
     MetodoPagoCreate,
     MetodoPagoResponse,
     PasswordChange,
@@ -89,6 +90,13 @@ async def register(data: UsuarioCreate, db: AsyncSession = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 async def login(data: UsuarioLogin, db: AsyncSession = Depends(get_db)):
     token = await service.authenticate(db, data.email, data.password)
+    return TokenResponse(access_token=token)
+
+
+@router.post("/google-auth", response_model=TokenResponse)
+async def google_auth(data: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
+    """Authenticate via Google ID token – creates the user if first login."""
+    token = await service.authenticate_google(db, data.credential)
     return TokenResponse(access_token=token)
 
 

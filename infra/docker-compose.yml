@@ -39,9 +39,11 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_ADMIN_EMAIL: ${ADMIN_EMAIL}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     container_name: frontend
     environment:
       NEXT_PUBLIC_ADMIN_EMAIL: ${ADMIN_EMAIL}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     depends_on:
       - usuarios
       - inventario
@@ -73,7 +75,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MINIO_BUCKET: users
       JWT_SECRET: ${JWT_SECRET:-super-secret-key-change-in-production}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-joscartinicioegc@gmail.com}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       SERVICE_NAME: usuarios
     labels:
       - "traefik.enable=true"
@@ -383,6 +386,7 @@ services:
         mc mb --ignore-existing local/campaigns;
         mc anonymous set download local/inventory;
         mc anonymous set download local/users;
+        mc anonymous set download local/campaigns;
         echo 'Buckets created and policies set';
       "
     networks:

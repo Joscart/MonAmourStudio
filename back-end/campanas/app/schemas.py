@@ -79,3 +79,49 @@ class PublicacionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Configuración Tienda Schemas ──────────────────────────────────────────────
+
+
+class ConfiguracionTiendaUpdate(BaseModel):
+    logo_url: Optional[str] = None
+    email_contacto: Optional[str] = None
+    email_soporte: Optional[str] = None
+    telefono_contacto: Optional[str] = None
+    telefono_soporte: Optional[str] = None
+    envio_gratis_desde: Optional[float] = None
+    costo_envio: Optional[float] = None
+    instagram_url: Optional[str] = None
+    tiktok_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    color_primary_h: Optional[int] = None
+    color_primary_s: Optional[int] = None
+    color_primary_l: Optional[int] = None
+    color_accent_h: Optional[int] = None
+    color_accent_s: Optional[int] = None
+    color_accent_l: Optional[int] = None
+
+
+class ConfiguracionTiendaResponse(BaseModel):
+    id: Optional[uuid.UUID] = None
+    logo_url: Optional[str] = None
+    email_contacto: Optional[str] = None
+    email_soporte: Optional[str] = None
+    telefono_contacto: Optional[str] = None
+    telefono_soporte: Optional[str] = None
+    envio_gratis_desde: Optional[float] = None
+    costo_envio: Optional[float] = None
+    instagram_url: Optional[str] = None
+    tiktok_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    color_primary_h: int = 340
+    color_primary_s: int = 60
+    color_primary_l: int = 65
+    color_accent_h: int = 38
+    color_accent_s: int = 70
+    color_accent_l: int = 50
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

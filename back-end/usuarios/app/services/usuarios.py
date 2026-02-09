@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -104,6 +105,77 @@ class UsuarioService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Credenciales inválidas",
             )
+        return self._create_jwt(user.id, user.rol)
+
+    async def authenticate_google(self, db: AsyncSession, id_token_str: str) -> str:
+        """Verify a Google ID token and return a JWT for the user."""
+        if not settings.GOOGLE_CLIENT_ID:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Google OAuth no está configurado",
+            )
+        try:
+            from google.oauth2 import id_token as google_id_token
+            from google.auth.transport import requests as google_requests
+
+            idinfo = google_id_token.verify_oauth2_token(
+                id_token_str,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID,
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token de Google inválido",
+            )
+
+        email = idinfo.get("email")
+        name = idinfo.get("name", "Usuario")
+        picture = idinfo.get("picture")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Email no disponible en el token de Google",
+            )
+
+        # Find existing user or create a new one
+        user = await self.repo.get_by_email(db, email)
+        if user is None:
+            rol = "admin" if self.is_default_admin(email) else "cliente"
+            user = Usuario(
+                nombre=name,
+                email=email,
+                password_hash=self._hash_password(secrets.token_urlsafe(32)),
+                rol=rol,
+                foto_url=picture,
+            )
+            user = await self.repo.create(db, user)
+
+            try:
+                from app.events.producer import kafka_producer
+                if kafka_producer is not None:
+                    await kafka_producer.publish(
+                        topic="usuarios",
+                        key=str(user.id),
+                        value={
+                            "event": "user_registered",
+                            "user_id": str(user.id),
+                            "email": user.email,
+                            "nombre": user.nombre,
+                            "provider": "google",
+                        },
+                    )
+            except Exception:
+                pass
+        else:
+            # Update name/photo from Google if not already set
+            updates: dict = {}
+            if not user.foto_url and picture:
+                updates["foto_url"] = picture
+            if updates:
+                await self.repo.update(db, user.id, updates)
+                user = await self.repo.get_by_id(db, user.id)  # type: ignore
+
         return self._create_jwt(user.id, user.rol)
 
     async def get_by_id(self, db: AsyncSession, user_id: uuid.UUID) -> Optional[Usuario]:

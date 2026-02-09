@@ -6,11 +6,13 @@ import Link from "next/link"
 import { Menu, X, ShoppingBag, Search, Heart, User, LogOut } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { useCart } from "@/contexts/cart-context"
+import { useStoreConfig } from "@/contexts/store-config-context"
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { isAuthenticated, user, logout } = useAuth()
   const { totalItems } = useCart()
+  const { config } = useStoreConfig()
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -42,7 +44,7 @@ export function Header() {
           {/* Logo */}
           <Link href="/" className="flex-shrink-0">
             <Image
-              src="/images/image.png"
+              src={config.logo_url || "/images/image.png"}
               alt="Mon Amour Studio"
               width={120}
               height={60}
@@ -61,7 +63,11 @@ export function Header() {
             </Link>
             {isAuthenticated ? (
               <Link href="/account" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Mi cuenta" title={user?.nombre}>
-                <User className="h-5 w-5" />
+                {user?.foto_url ? (
+                  <Image src={user.foto_url} alt={user.nombre || ""} width={24} height={24} className="h-6 w-6 rounded-full object-cover" />
+                ) : (
+                  <User className="h-5 w-5" />
+                )}
               </Link>
             ) : (
               <Link href="/login" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Iniciar sesion">

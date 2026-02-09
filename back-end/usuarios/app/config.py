@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     KAFKA_BOOTSTRAP_SERVERS: str = "kafka:9092"
     # ── Admin ─────────────────────────────────────────────────────
     ADMIN_EMAIL: str = ""
+    # ── Google OAuth ──────────────────────────────────────────────
+    GOOGLE_CLIENT_ID: str = ""
     # ── JWT ───────────────────────────────────────────────────────────
     JWT_SECRET: str = "super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"

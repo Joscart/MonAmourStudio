@@ -9,8 +9,8 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/contexts/auth-context"
-import { inventoryApi, ordersApi, usersApi, productTypesApi, warrantyApi, packagingApi, discountsApi, sizesApi } from "@/lib/api"
-import type { ProductoResponse, PedidoResponse, UsuarioResponse, TipoProductoResponse, GarantiaResponse, EmpaqueResponse, DescuentoResponse } from "@/lib/types"
+import { inventoryApi, ordersApi, usersApi, productTypesApi, warrantyApi, packagingApi, discountsApi, sizesApi, storeConfigApi } from "@/lib/api"
+import type { ProductoResponse, PedidoResponse, UsuarioResponse, TipoProductoResponse, GarantiaResponse, EmpaqueResponse, DescuentoResponse, ConfiguracionTiendaResponse } from "@/lib/types"
 import {
   LayoutDashboard,
   Package,
@@ -39,7 +39,14 @@ import {
   Upload,
   Star,
   Tag,
+  Palette,
+  Instagram,
+  Globe,
+  MessageCircle,
+  Phone,
+  Mail,
 } from "lucide-react"
+import { useStoreConfig } from "@/contexts/store-config-context"
 
 const menuItems = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
@@ -50,6 +57,39 @@ const menuItems = [
   { id: "estadisticas", label: "Estadisticas", icon: BarChart3 },
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
+
+/* ── Color conversion helpers ──────────────────────────────── */
+
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  hex = hex.replace("#", "")
+  const r = parseInt(hex.substring(0, 2), 16) / 255
+  const g = parseInt(hex.substring(2, 4), 16) / 255
+  const b = parseInt(hex.substring(4, 6), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  let h = 0, s = 0
+  const l = (max + min) / 2
+  if (max !== min) {
+    const d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break
+      case g: h = ((b - r) / d + 2) / 6; break
+      case b: h = ((r - g) / d + 4) / 6; break
+    }
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) }
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const sN = s / 100, lN = l / 100
+  const a = sN * Math.min(lN, 1 - lN)
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12
+    const color = lN - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
+    return Math.round(255 * color).toString(16).padStart(2, "0")
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
 
 export default function AdminDashboard() {
   const router = useRouter()
@@ -105,6 +145,31 @@ export default function AdminDashboard() {
   const [inlineCreating, setInlineCreating] = useState<null | "tipo" | "garantia" | "empaque" | "descuento">(null)
   const [inlineInput, setInlineInput] = useState({ nombre: "", dias: "", porcentaje: "" })
 
+  // ── Store config state (ajustes) ───────────────────────────
+  const { config: storeConfig, refresh: refreshStoreConfig } = useStoreConfig()
+  const [storeForm, setStoreForm] = useState({
+    email_contacto: "",
+    email_soporte: "",
+    telefono_contacto: "",
+    telefono_soporte: "",
+    envio_gratis_desde: "",
+    costo_envio: "",
+    instagram_url: "",
+    tiktok_url: "",
+    whatsapp_url: "",
+  })
+  const [storeColorForm, setStoreColorForm] = useState({
+    primaryColor: "#d4748b",
+    accentColor: "#d4a017",
+  })
+  const [storeSaving, setStoreSaving] = useState(false)
+  const [storeError, setStoreError] = useState<string | null>(null)
+  const [storeSuccess, setStoreSuccess] = useState(false)
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const logoInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push("/login")
@@ -133,6 +198,26 @@ export default function AdminDashboard() {
       .catch(() => {})
       .finally(() => setIsLoading(false))
   }, [authLoading, isAuthenticated, router])
+
+  // Sync store config into form when loaded
+  useEffect(() => {
+    setStoreForm({
+      email_contacto: storeConfig.email_contacto ?? "",
+      email_soporte: storeConfig.email_soporte ?? "",
+      telefono_contacto: storeConfig.telefono_contacto ?? "",
+      telefono_soporte: storeConfig.telefono_soporte ?? "",
+      envio_gratis_desde: storeConfig.envio_gratis_desde != null ? String(storeConfig.envio_gratis_desde) : "",
+      costo_envio: storeConfig.costo_envio != null ? String(storeConfig.costo_envio) : "",
+      instagram_url: storeConfig.instagram_url ?? "",
+      tiktok_url: storeConfig.tiktok_url ?? "",
+      whatsapp_url: storeConfig.whatsapp_url ?? "",
+    })
+    setStoreColorForm({
+      primaryColor: hslToHex(storeConfig.color_primary_h, storeConfig.color_primary_s, storeConfig.color_primary_l),
+      accentColor: hslToHex(storeConfig.color_accent_h, storeConfig.color_accent_s, storeConfig.color_accent_l),
+    })
+    setLogoPreview(storeConfig.logo_url ?? null)
+  }, [storeConfig])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -418,11 +503,15 @@ export default function AdminDashboard() {
               <div className="bg-card rounded-lg border border-border p-4 sticky top-24">
                 {/* Admin Info */}
                 <div className="flex items-center gap-4 pb-4 border-b border-border mb-4">
-                  <div className="w-12 h-12 rounded-full bg-accent flex items-center justify-center">
-                    <span className="text-accent-foreground font-bold text-lg">
-                      {user?.nombre?.charAt(0)?.toUpperCase() ?? "A"}
-                    </span>
-                  </div>
+                  {user?.foto_url ? (
+                    <Image src={user.foto_url} alt={user.nombre || ""} width={48} height={48} className="w-12 h-12 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-accent flex items-center justify-center">
+                      <span className="text-accent-foreground font-bold text-lg">
+                        {user?.nombre?.charAt(0)?.toUpperCase() ?? "A"}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <p className="font-medium text-foreground">{user?.nombre ?? "Admin"}</p>
                     <p className="text-xs text-muted-foreground">{user?.email ?? ""}</p>
@@ -1534,48 +1623,293 @@ export default function AdminDashboard() {
 
               {/* Settings Section */}
               {activeSection === "ajustes" && (
-                <div className="bg-card rounded-lg border border-border p-6">
-                  <h2 className="font-serif text-xl text-foreground mb-6">Ajustes de la Tienda</h2>
-                  
-                  <div className="space-y-6">
+                <div className="space-y-6">
+                  <h2 className="font-serif text-xl text-foreground">Ajustes de la Tienda</h2>
+
+                  {storeError && (
+                    <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-md px-4 py-3">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                      {storeError}
+                    </div>
+                  )}
+                  {storeSuccess && (
+                    <div className="flex items-center gap-2 bg-green-500/10 text-green-700 text-sm rounded-md px-4 py-3">
+                      <Check className="h-4 w-4 flex-shrink-0" />
+                      Cambios guardados correctamente
+                    </div>
+                  )}
+
+                  {/* Logo Upload */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <Upload className="h-4 w-4" /> Logo de la Empresa
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Sube un logo en PNG, SVG, JPG o WebP. Se actualizara en toda la pagina.
+                    </p>
+
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        setLogoUploading(true)
+                        setStoreError(null)
+                        try {
+                          const reader = new FileReader()
+                          reader.onload = (ev) => setLogoPreview(ev.target?.result as string)
+                          reader.readAsDataURL(file)
+                          await storeConfigApi.uploadLogo(file)
+                          await refreshStoreConfig()
+                        } catch (err: unknown) {
+                          setStoreError(err instanceof Error ? err.message : "Error al subir logo")
+                        } finally {
+                          setLogoUploading(false)
+                          if (logoInputRef.current) logoInputRef.current.value = ""
+                        }
+                      }}
+                    />
+
+                    <div className="flex items-center gap-6">
+                      <div className="w-24 h-24 border-2 border-dashed border-border rounded-lg flex items-center justify-center overflow-hidden bg-secondary/30">
+                        {logoPreview ? (
+                          <Image src={logoPreview} alt="Logo" width={96} height={96} className="object-contain w-full h-full" />
+                        ) : (
+                          <Upload className="h-8 w-8 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Button variant="outline" size="sm" className="bg-transparent" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}>
+                          {logoUploading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Subiendo...</> : "Cambiar Logo"}
+                        </Button>
+                        <p className="text-xs text-muted-foreground">Si no hay logo, se usa el por defecto.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contact Info */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <Mail className="h-4 w-4" /> Informacion de Contacto
+                    </h3>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Email de Contacto</label>
+                        <Input
+                          type="email"
+                          value={storeForm.email_contacto}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, email_contacto: e.target.value }))}
+                          placeholder="contacto@monamourstudio.com"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Email de Soporte</label>
+                        <Input
+                          type="email"
+                          value={storeForm.email_soporte}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, email_soporte: e.target.value }))}
+                          placeholder="soporte@monamourstudio.com"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Telefono de Contacto</label>
+                        <Input
+                          value={storeForm.telefono_contacto}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, telefono_contacto: e.target.value }))}
+                          placeholder="+593 2 123 4567"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Telefono de Soporte</label>
+                        <Input
+                          value={storeForm.telefono_soporte}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, telefono_soporte: e.target.value }))}
+                          placeholder="+593 9 987 6543"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Shipping Config */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <Package className="h-4 w-4" /> Configuracion de Envio
+                    </h3>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Envio Gratis desde (USD)</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={storeForm.envio_gratis_desde}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, envio_gratis_desde: e.target.value }))}
+                          placeholder="100.00"
+                          className="bg-background border-border"
+                        />
+                        <p className="text-xs text-muted-foreground">0 = siempre gratis, vacio = sin envio gratis</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Costo de Envio Estandar (USD)</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={storeForm.costo_envio}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, costo_envio: e.target.value }))}
+                          placeholder="5.99"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Social Links */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <Globe className="h-4 w-4" /> Redes Sociales
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <Instagram className="h-4 w-4" /> Instagram
+                        </label>
+                        <Input
+                          value={storeForm.instagram_url}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, instagram_url: e.target.value }))}
+                          placeholder="https://instagram.com/monamourstudio"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <Globe className="h-4 w-4" /> TikTok
+                        </label>
+                        <Input
+                          value={storeForm.tiktok_url}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, tiktok_url: e.target.value }))}
+                          placeholder="https://tiktok.com/@monamourstudio"
+                          className="bg-background border-border"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <MessageCircle className="h-4 w-4" /> WhatsApp (Canal de Difusion)
+                        </label>
+                        <Input
+                          value={storeForm.whatsapp_url}
+                          onChange={(e) => setStoreForm((f) => ({ ...f, whatsapp_url: e.target.value }))}
+                          placeholder="https://wa.me/channel/..."
+                          className="bg-background border-border"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Color Configuration */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <Palette className="h-4 w-4" /> Colores de la Pagina
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Selecciona los colores primario y de acento. Se generaran automaticamente los temas claro y oscuro.
+                    </p>
                     <div className="grid sm:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label htmlFor="storeName" className="text-sm font-medium text-foreground">Nombre de la Tienda</label>
-                        <Input id="storeName" defaultValue="Mon Amour Studio" className="bg-background border-border" />
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="storeEmail" className="text-sm font-medium text-foreground">Email de Contacto</label>
-                        <Input id="storeEmail" type="email" defaultValue="info@monamourstudio.com" className="bg-background border-border" />
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="storePhone" className="text-sm font-medium text-foreground">Telefono</label>
-                        <Input id="storePhone" defaultValue="+593 2 123 4567" className="bg-background border-border" />
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="storeCurrency" className="text-sm font-medium text-foreground">Moneda</label>
-                        <Input id="storeCurrency" defaultValue="USD ($)" className="bg-background border-border" />
-                      </div>
-                    </div>
-
-                    <div className="border-t border-border pt-6">
-                      <h3 className="font-medium text-foreground mb-4">Configuracion de Envio</h3>
-                      <div className="grid sm:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                          <label htmlFor="freeShipping" className="text-sm font-medium text-foreground">Envio Gratis desde</label>
-                          <Input id="freeShipping" defaultValue="$100.00" className="bg-background border-border" />
+                      <div className="space-y-3">
+                        <label className="text-sm font-medium text-foreground">Color Primario</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={storeColorForm.primaryColor}
+                            onChange={(e) => setStoreColorForm((f) => ({ ...f, primaryColor: e.target.value }))}
+                            className="w-12 h-12 rounded-lg border border-border cursor-pointer"
+                          />
+                          <div>
+                            <p className="text-sm font-mono text-foreground">{storeColorForm.primaryColor}</p>
+                            <p className="text-xs text-muted-foreground">Botones, enlaces, acentos principales</p>
+                          </div>
                         </div>
-                        <div className="space-y-2">
-                          <label htmlFor="shippingCost" className="text-sm font-medium text-foreground">Costo de Envio Estandar</label>
-                          <Input id="shippingCost" defaultValue="$5.99" className="bg-background border-border" />
+                        <div className="h-8 rounded-lg" style={{ backgroundColor: storeColorForm.primaryColor }} />
+                      </div>
+                      <div className="space-y-3">
+                        <label className="text-sm font-medium text-foreground">Color de Acento</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={storeColorForm.accentColor}
+                            onChange={(e) => setStoreColorForm((f) => ({ ...f, accentColor: e.target.value }))}
+                            className="w-12 h-12 rounded-lg border border-border cursor-pointer"
+                          />
+                          <div>
+                            <p className="text-sm font-mono text-foreground">{storeColorForm.accentColor}</p>
+                            <p className="text-xs text-muted-foreground">Badges, indicadores, destacados</p>
+                          </div>
                         </div>
+                        <div className="h-8 rounded-lg" style={{ backgroundColor: storeColorForm.accentColor }} />
                       </div>
                     </div>
+                  </div>
 
-                    <div className="flex justify-end">
-                      <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                        Guardar Cambios
-                      </Button>
-                    </div>
+                  {/* Save Button */}
+                  <div className="flex justify-end">
+                    <Button
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                      disabled={storeSaving}
+                      onClick={async () => {
+                        setStoreError(null)
+                        setStoreSuccess(false)
+                        // Validate shipping fields as numbers
+                        if (storeForm.envio_gratis_desde && isNaN(parseFloat(storeForm.envio_gratis_desde))) {
+                          setStoreError("El valor de 'Envio Gratis desde' debe ser un numero valido.")
+                          return
+                        }
+                        if (storeForm.costo_envio && isNaN(parseFloat(storeForm.costo_envio))) {
+                          setStoreError("El valor de 'Costo de Envio' debe ser un numero valido.")
+                          return
+                        }
+
+                        setStoreSaving(true)
+                        try {
+                          const primaryHsl = hexToHsl(storeColorForm.primaryColor)
+                          const accentHsl = hexToHsl(storeColorForm.accentColor)
+
+                          await storeConfigApi.update({
+                            email_contacto: storeForm.email_contacto || null,
+                            email_soporte: storeForm.email_soporte || null,
+                            telefono_contacto: storeForm.telefono_contacto || null,
+                            telefono_soporte: storeForm.telefono_soporte || null,
+                            envio_gratis_desde: storeForm.envio_gratis_desde ? parseFloat(storeForm.envio_gratis_desde) : null,
+                            costo_envio: storeForm.costo_envio ? parseFloat(storeForm.costo_envio) : null,
+                            instagram_url: storeForm.instagram_url || null,
+                            tiktok_url: storeForm.tiktok_url || null,
+                            whatsapp_url: storeForm.whatsapp_url || null,
+                            color_primary_h: primaryHsl.h,
+                            color_primary_s: primaryHsl.s,
+                            color_primary_l: primaryHsl.l,
+                            color_accent_h: accentHsl.h,
+                            color_accent_s: accentHsl.s,
+                            color_accent_l: accentHsl.l,
+                          })
+                          await refreshStoreConfig()
+                          setStoreSuccess(true)
+                          setTimeout(() => setStoreSuccess(false), 3000)
+                        } catch (err: unknown) {
+                          setStoreError(err instanceof Error ? err.message : "Error al guardar ajustes")
+                        } finally {
+                          setStoreSaving(false)
+                        }
+                      }}
+                    >
+                      {storeSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                      Guardar Cambios
+                    </Button>
                   </div>
                 </div>
               )}

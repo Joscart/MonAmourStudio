@@ -353,3 +353,46 @@ export interface FavoritoResponse {
   producto_id: string
   created_at: string
 }
+
+// ── Configuración Tienda ───────────────────────────────────────────
+
+export interface ConfiguracionTiendaUpdate {
+  logo_url?: string | null
+  email_contacto?: string | null
+  email_soporte?: string | null
+  telefono_contacto?: string | null
+  telefono_soporte?: string | null
+  envio_gratis_desde?: number | null
+  costo_envio?: number | null
+  instagram_url?: string | null
+  tiktok_url?: string | null
+  whatsapp_url?: string | null
+  color_primary_h?: number
+  color_primary_s?: number
+  color_primary_l?: number
+  color_accent_h?: number
+  color_accent_s?: number
+  color_accent_l?: number
+}
+
+export interface ConfiguracionTiendaResponse {
+  id?: string | null
+  logo_url: string | null
+  email_contacto: string | null
+  email_soporte: string | null
+  telefono_contacto: string | null
+  telefono_soporte: string | null
+  envio_gratis_desde: number | null
+  costo_envio: number | null
+  instagram_url: string | null
+  tiktok_url: string | null
+  whatsapp_url: string | null
+  color_primary_h: number
+  color_primary_s: number
+  color_primary_l: number
+  color_accent_h: number
+  color_accent_s: number
+  color_accent_l: number
+  created_at?: string | null
+  updated_at?: string | null
+}

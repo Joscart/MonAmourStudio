@@ -44,6 +44,8 @@ import type {
   TamanoCreate,
   ResenaCreate,
   ResenaResponse,
+  ConfiguracionTiendaUpdate,
+  ConfiguracionTiendaResponse,
 } from "./types"
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -101,6 +103,13 @@ export const usersApi = {
     return request<TokenResponse>("/api/users/login", {
       method: "POST",
       body: JSON.stringify(data),
+    })
+  },
+
+  googleAuth(credential: string) {
+    return request<TokenResponse>("/api/users/google-auth", {
+      method: "POST",
+      body: JSON.stringify({ credential }),
     })
   },
 
@@ -485,5 +494,42 @@ export const campaignsApi = {
 
   get(campanaId: string) {
     return request<CampanaResponse>(`/api/campaigns/${campanaId}`)
+  },
+}
+
+/* ── Configuración de Tienda ──────────────────────────────── */
+
+export const storeConfigApi = {
+  get() {
+    return request<ConfiguracionTiendaResponse>("/api/campaigns/tienda/config")
+  },
+
+  update(data: ConfiguracionTiendaUpdate) {
+    return request<ConfiguracionTiendaResponse>("/api/campaigns/tienda/config", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  },
+
+  async uploadLogo(file: File): Promise<ConfiguracionTiendaResponse> {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const token = getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers["Authorization"] = `Bearer ${token}`
+
+    const res = await fetch("/api/campaigns/tienda/logo", {
+      method: "POST",
+      headers,
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, body.detail ?? res.statusText)
+    }
+
+    return res.json()
   },
 }

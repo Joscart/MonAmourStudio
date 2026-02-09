@@ -17,6 +17,7 @@ from app.config import settings
 from app.controllers.campanas import router as campanas_router
 from app.controllers.health import router as health_router
 from app.controllers.publicaciones import router as publicaciones_router
+from app.controllers.tienda import router as tienda_router
 from app.database import engine
 from app.events.consumer import (
     KafkaEventConsumer,
@@ -134,3 +135,4 @@ async def metrics():
 app.include_router(health_router)
 app.include_router(campanas_router)
 app.include_router(publicaciones_router)
+app.include_router(tienda_router)
