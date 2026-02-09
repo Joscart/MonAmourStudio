@@ -1,0 +1,396 @@
+@startuml
+title Diagrama de Clases: E-Commerce Mon Amour Studio\n(Refleja implementación real del monorepo)
+
+skinparam classAttributeIconSize 0
+skinparam Shadowing false
+
+' ── Infraestructura de eventos ─────────────────────────────────
+package "Infraestructura Eventos" {
+  class KafkaEventProducer {
+    - bootstrap_servers: string
+    - producer: AIOKafkaProducer
+    + start(): void
+    + stop(): void
+    + publish(topic: str, key: str, value: dict): void
+  }
+
+  class KafkaEventConsumer {
+    - bootstrap_servers: string
+    - group_id: string
+    - consumer: AIOKafkaConsumer
+    - processed_ids: Set<string>
+    + start(): void
+    + stop(): void
+    + consume(topics: list, handler: Callable): void
+  }
+}
+
+' ── Microservicio Usuarios ─────────────────────────────────────
+package "Microservicio Usuarios" {
+  class Usuario <<Entity>> {
+    - id: UUID
+    - nombre: string
+    - email: string (unique)
+    - password_hash: string
+    - rol: string = "cliente"
+    - created_at: DateTime
+  }
+
+  class Sesion <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID (FK)
+    - token: string
+    - expira: DateTime
+    - created_at: DateTime
+  }
+
+  class UsuarioService <<Service>> {
+    + register(db, data: UsuarioCreate): Usuario
+    + authenticate(db, email, password): TokenResponse
+    + get_by_id(db, user_id): Usuario
+    + update_profile(db, user_id, data): Usuario
+    + list_users(db): list[Usuario]
+    + delete_user(db, user_id): void
+  }
+
+  class UsuarioRepository <<Repository>> {
+    + create(db, usuario): Usuario
+    + get_by_email(db, email): Usuario?
+    + get_by_id(db, user_id): Usuario?
+    + update(db, user_id, data): void
+    + list_all(db): list[Usuario]
+    + delete(db, user_id): void
+  }
+
+  class UsuariosController <<Controller>> {
+    + POST /register
+    + POST /login
+    + GET /me
+    + PUT /me
+    + GET /
+    + DELETE /{user_id}
+  }
+}
+
+' ── Microservicio Inventario ───────────────────────────────────
+package "Microservicio Inventario" {
+  class Producto <<Entity>> {
+    - id: UUID
+    - sku: string (unique)
+    - nombre: string
+    - descripcion: text
+    - precio: Decimal(10,2)
+    - moneda: string = "USD"
+    - stock: int = 0
+    - imagen_url: string?
+    - created_at: DateTime
+    - updated_at: DateTime
+  }
+
+  class ReglaDisponibilidad <<Entity>> {
+    - id: UUID
+    - producto_id: UUID (FK)
+    - tipo: string
+    - limite_por_pedido: int
+    - ventana_inicio: DateTime?
+    - ventana_fin: DateTime?
+  }
+
+  class InventarioService <<Service>> {
+    + list_products(db, filters): list[Producto]
+    + get_product(db, product_id): Producto
+    + create_product(db, data): Producto
+    + update_product(db, product_id, data): Producto
+    + delete_product(db, product_id): void
+    + reserve_stock(db, product_id, cantidad, pedido_id): void
+    + release_stock(db, product_id, cantidad, pedido_id): void
+  }
+
+  class InventarioRepository <<Repository>> {
+    + create(db, producto): Producto
+    + get_by_id(db, id): Producto?
+    + list_all(db, filters): list[Producto]
+    + update(db, id, data): void
+    + delete(db, id): void
+    + update_stock(db, id, delta): void
+  }
+
+  class InventarioController <<Controller>> {
+    + GET /productos
+    + GET /productos/{id}
+    + POST /productos
+    + PUT /productos/{id}
+    + DELETE /productos/{id}
+    + POST /productos/{id}/reserve
+    + POST /productos/{id}/release
+  }
+}
+
+' ── Microservicio Pedidos ──────────────────────────────────────
+package "Microservicio Pedidos" {
+  class Pedido <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID
+    - fecha_creacion: DateTime
+    - estado: string = "pendiente"
+    - subtotal: Decimal
+    - shipping: Decimal
+    - total: Decimal
+    - direccion_entrega: string
+    - coordenadas_entrega: string?
+    - created_at: DateTime
+    - updated_at: DateTime
+  }
+
+  class PedidoItem <<Entity>> {
+    - id: UUID
+    - pedido_id: UUID (FK)
+    - producto_id: UUID
+    - variante: string?
+    - cantidad: int
+    - precio_unitario: Decimal
+  }
+
+  class PedidoEvento <<Entity>> {
+    - id: UUID
+    - pedido_id: UUID (FK)
+    - event_id: string (unique)
+    - evento: string
+    - payload: JSON
+    - created_at: DateTime
+  }
+
+  class PedidoService <<Service>> {
+    + create_order(db, data): Pedido
+    + get_order(db, pedido_id): Pedido
+    + list_orders(db, usuario_id?): list[Pedido]
+    + update_status(db, pedido_id, status): void
+    + process_payment(db, pedido_id, pago): PagoResponse
+  }
+
+  class PedidoRepository <<Repository>> {
+    + create(db, pedido, items): Pedido
+    + get_by_id(db, id): Pedido
+    + list_by_user(db, usuario_id?): list[Pedido]
+    + update_status(db, id, status): void
+    + record_event(db, pedido_id, event_id, evento, payload): void
+  }
+
+  class PedidosController <<Controller>> {
+    + POST /pedidos
+    + GET /pedidos
+    + GET /pedidos/{id}
+    + PUT /pedidos/{id}/estado
+    + POST /pedidos/{id}/pago
+  }
+}
+
+' ── Microservicio Entregas ─────────────────────────────────────
+package "Microservicio Entregas" {
+  class Entrega <<Entity>> {
+    - id: UUID
+    - pedido_id: UUID (unique)
+    - estado: string = "programada"
+    - guia: string
+    - fecha_programada: DateTime?
+    - fecha_entrega: DateTime?
+    - direccion: string
+    - notas: text?
+    - created_at: DateTime
+    - updated_at: DateTime
+  }
+
+  class EntregaEvento <<Entity>> {
+    - id: UUID
+    - entrega_id: UUID (FK)
+    - event_id: string (unique)
+    - evento: string
+    - payload: JSON
+    - created_at: DateTime
+  }
+
+  class EntregaService <<Service>> {
+    + create_delivery(db, data): Entrega
+    + get_delivery(db, id): Entrega
+    + get_by_pedido(db, pedido_id): Entrega
+    + list_deliveries(db): list[Entrega]
+    + update_status(db, id, data): Entrega
+    + reschedule(db, id, data): Entrega
+  }
+
+  class EntregaRepository <<Repository>> {
+    + create(db, entrega): Entrega
+    + get_by_id(db, id): Entrega?
+    + get_by_pedido_id(db, pedido_id): Entrega?
+    + list_all(db): list[Entrega]
+    + update_status(db, id, estado, notas?): void
+    + reschedule(db, id, fecha): void
+    + record_event(db, entrega_id, event_id, evento, payload): void
+  }
+
+  class EntregasController <<Controller>> {
+    + POST /entregas
+    + GET /entregas
+    + GET /entregas/{id}
+    + PUT /entregas/{id}/estado
+    + PUT /entregas/{id}/reagendar
+    + GET /entregas/pedido/{pedido_id}
+  }
+}
+
+' ── Microservicio Campañas ─────────────────────────────────────
+package "Microservicio Campañas" {
+  class Campana <<Entity>> {
+    - id: UUID
+    - titulo: string
+    - mensaje_global: text
+    - segmentacion: string?
+    - fecha_inicio: DateTime
+    - fecha_fin: DateTime
+    - activa: boolean = false
+    - created_at: DateTime
+    - updated_at: DateTime
+  }
+
+  class Publicacion <<Entity>> {
+    - id: UUID
+    - campana_id: UUID (FK)
+    - tipo_media: string
+    - media_url: string?
+    - caption: text
+    - canal: string
+    - scheduled_at: DateTime?
+    - publicada: boolean = false
+    - created_at: DateTime
+  }
+
+  class CampanaService <<Service>> {
+    + create_campaign(db, data): Campana
+    + list_campaigns(db): list[Campana]
+    + get_campaign(db, id): Campana
+    + update_campaign(db, id, data): Campana
+    + activate_campaign(db, id): Campana
+    + delete_campaign(db, id): void
+  }
+
+  class PublicacionService <<Service>> {
+    + create_publication(db, data): Publicacion
+    + list_by_campaign(db, campana_id): list[Publicacion]
+    + publish(db, pub_id): Publicacion
+    + schedule(db, pub_id, scheduled_at): Publicacion
+  }
+
+  class CampanasController <<Controller>> {
+    + POST /campanas
+    + GET /campanas
+    + GET /campanas/{id}
+    + PUT /campanas/{id}
+    + POST /campanas/{id}/activar
+    + DELETE /campanas/{id}
+  }
+
+  class PublicacionesController <<Controller>> {
+    + POST /publicaciones
+    + GET /publicaciones/campana/{id}
+    + POST /publicaciones/{id}/publicar
+    + POST /publicaciones/{id}/programar
+  }
+}
+
+' ── Frontend (Next.js / React) ─────────────────────────────────
+package "Frontend (Next.js + React + Tailwind)" {
+  class AuthContext <<Context>> {
+    + token: string?
+    + user: UsuarioResponse?
+    + login(email, password): void
+    + logout(): void
+  }
+
+  class CartState <<State>> {
+    + items: CartItem[]
+    + addItem(product, qty): void
+    + removeItem(id): void
+    + updateQuantity(id, qty): void
+    + total: Decimal
+  }
+
+  class ApiClient <<Service>> {
+    + get(path): Response
+    + post(path, body): Response
+    + put(path, body): Response
+    + delete(path): Response
+    - baseUrl: string = "/api"
+    - authToken: string?
+  }
+
+  class Pages <<View>> {
+    + HomePage
+    + ProductsPage (catálogo)
+    + ProductDetailPage [id]
+    + CartPage
+    + PaymentPage (checkout)
+    + OrdersPage (historial)
+    + LoginPage
+    + RegisterPage
+    + AccountPage
+    + DashboardPage (admin)
+  }
+}
+
+' ── Relaciones ─────────────────────────────────────────────────
+Usuario "1" --> "0..*" Sesion : genera
+Usuario "1" --> "0..*" Pedido : realiza
+
+UsuariosController --> UsuarioService
+UsuarioService --> UsuarioRepository
+UsuarioService --> KafkaEventProducer : publica user.registered
+
+Pedido "1" --> "1..*" PedidoItem : contiene
+Pedido "1" --> "0..*" PedidoEvento : registra
+PedidoItem "0..*" --> "1" Producto : referencia
+
+PedidosController --> PedidoService
+PedidoService --> PedidoRepository
+PedidoService --> KafkaEventProducer : publica order.created, payment.succeeded
+
+Producto "1" --> "0..*" ReglaDisponibilidad : tiene
+
+InventarioController --> InventarioService
+InventarioService --> InventarioRepository
+InventarioService --> KafkaEventProducer : publica stock.reserved
+
+KafkaEventConsumer --> InventarioService : consume order.created
+
+Pedido "1" --> "0..1" Entrega : genera
+
+EntregasController --> EntregaService
+EntregaService --> EntregaRepository
+EntregaService --> KafkaEventProducer : publica entrega.programada
+
+KafkaEventConsumer --> EntregaService : consume payment.succeeded
+
+Campana "1" --> "1..*" Publicacion : contiene
+
+CampanasController --> CampanaService
+PublicacionesController --> PublicacionService
+CampanaService --> KafkaEventProducer : publica campana.activada
+
+Pages --> ApiClient : consume REST /api/*
+ApiClient --> UsuariosController : /api/users
+ApiClient --> InventarioController : /api/inventory
+ApiClient --> PedidosController : /api/orders
+ApiClient --> EntregasController : /api/deliveries
+
+note right of Usuario
+  Cada microservicio mantiene su propia BD (Postgres)
+  y su bucket en MinIO si maneja media.
+  Eventos Kafka: order.created, payment.succeeded,
+  stock.reserved, entrega.programada, campana.activada
+end note
+
+note bottom of Pages
+  Servido por Nginx que proxea
+  /api/* a los microservicios
+end note
+
+@enduml

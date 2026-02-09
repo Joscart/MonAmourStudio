@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "usuarios"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["usuarios:8000"]
+        labels:
+          service: "usuarios"
+
+  - job_name: "inventario"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["inventario:8000"]
+        labels:
+          service: "inventario"
+
+  - job_name: "pedidos"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pedidos:8000"]
+        labels:
+          service: "pedidos"
+
+  - job_name: "entregas"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["entregas:8000"]
+        labels:
+          service: "entregas"
+
+  - job_name: "campanas"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["campanas:8000"]
+        labels:
+          service: "campanas"

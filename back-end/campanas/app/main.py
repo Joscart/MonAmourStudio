@@ -1,56 +1,136 @@
-import os
-import time
-from typing import Optional
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.responses import Response
 
-app = FastAPI(title="Campanas Service", version="0.1.0")
+from app.config import settings
+from app.controllers.campanas import router as campanas_router
+from app.controllers.health import router as health_router
+from app.controllers.publicaciones import router as publicaciones_router
+from app.database import engine
+from app.events.consumer import (
+    KafkaEventConsumer,
+    handle_order_created,
+    handle_payment_succeeded,
+)
+from app.events.producer import KafkaEventProducer
+from app.models import Base
+
+logger = logging.getLogger(__name__)
+
+# ── OpenTelemetry setup ──────────────────────────────────────────────────────
+
+resource = Resource.create({"service.name": settings.SERVICE_NAME})
+tracer_provider = TracerProvider(resource=resource)
+otlp_exporter = OTLPSpanExporter(endpoint=settings.OTLP_ENDPOINT, insecure=True)
+tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+trace.set_tracer_provider(tracer_provider)
+
+# ── Module-level Kafka producer reference ─────────────────────────────────────
+import app.events.producer as _producer_mod  # noqa: E402
 
 
-class CampaignCreate(BaseModel):
-    name: str
-    budget: float
-    description: Optional[str] = None
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 
-class PublicationCreate(BaseModel):
-    channel: str
-    scheduled_at: Optional[str] = None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── startup ───────────────────────────────────────────────────────
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ready")
+
+    # Kafka producer
+    kafka = KafkaEventProducer()
+    await kafka.start()
+    _producer_mod.kafka_producer = kafka
+
+    # Kafka consumer (order.created, payment.succeeded for analytics)
+    consumer = KafkaEventConsumer(group_id="campanas-group")
+    await consumer.start(topics=["order.created", "payment.succeeded"])
+
+    async def _dispatch(payload: dict) -> None:
+        event_type = payload.get("event", "")
+        if event_type == "order.created":
+            await handle_order_created(payload)
+        elif event_type == "payment.succeeded":
+            await handle_payment_succeeded(payload)
+        else:
+            logger.debug("Unhandled event type: %s", event_type)
+
+    consumer_task = asyncio.create_task(consumer.consume(_dispatch))
+
+    yield
+
+    # ── shutdown ──────────────────────────────────────────────────────
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        pass
+    await consumer.stop()
+
+    await kafka.stop()
+    _producer_mod.kafka_producer = None
+
+    await engine.dispose()
+    tracer_provider.shutdown()
 
 
-class CampaignResponse(BaseModel):
-    id: str
-    name: str
-    budget: float
+# ── FastAPI application ───────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="Campañas API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Instrument FastAPI with OpenTelemetry
+FastAPIInstrumentor.instrument_app(app)
 
 
-async def get_settings():
-    return {
-        "seed": os.getenv("SEED", "false"),
-        "database_url": os.getenv("DATABASE_URL", ""),
-        "minio_endpoint": os.getenv("MINIO_ENDPOINT", ""),
-    }
+# ── Trace-ID middleware ───────────────────────────────────────────────────────
 
 
-@app.get("/healthz")
-async def healthcheck():
-    return {"status": "ok", "service": "campanas", "ts": int(time.time())}
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    response = await call_next(request)
+    span = trace.get_current_span()
+    if span and span.get_span_context().trace_id:
+        trace_id = format(span.get_span_context().trace_id, "032x")
+        response.headers["X-Trace-Id"] = trace_id
+    return response
 
 
-@app.get("/metrics")
+# ── Prometheus metrics endpoint ───────────────────────────────────────────────
+
+
+@app.get("/metrics", include_in_schema=False)
 async def metrics():
-    return {"uptime_seconds": int(time.time()), "version": app.version}
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.post("/campaigns", status_code=status.HTTP_201_CREATED, response_model=CampaignResponse)
-async def create_campaign(payload: CampaignCreate, settings: dict = Depends(get_settings)):
-    campaign_id = f"campaign-{int(time.time())}"
-    return CampaignResponse(id=campaign_id, name=payload.name, budget=payload.budget)
+# ── Routers ───────────────────────────────────────────────────────────────────
 
-
-@app.post("/campaigns/{campaign_id}/publications")
-async def add_publication(campaign_id: str, payload: PublicationCreate, settings: dict = Depends(get_settings)):
-    if not campaign_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
-    return {"campaign_id": campaign_id, "publication": payload.dict(), "status": "scheduled"}
+app.include_router(health_router)
+app.include_router(campanas_router)
+app.include_router(publicaciones_router)

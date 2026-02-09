@@ -28,79 +28,9 @@ import {
   Shield,
   Gift,
 } from "lucide-react"
-
-const allProducts = [
-  {
-    id: "1",
-    name: "Marco Romance Dorado",
-    price: 89.00,
-    images: ["/images/frame-1.jpg"],
-    category: "Marcos Premium",
-    description: "Un elegante marco dorado con acabados romanticos, perfecto para fotos de pareja, bodas y momentos especiales. Fabricado con materiales de alta calidad y detalles artesanales.",
-    dimensions: "20 x 25 cm",
-    material: "Madera con acabado dorado",
-    features: ["Vidrio protector", "Soporte trasero", "Para colgar o mesa", "Empaque de regalo"],
-    isBestseller: true,
-  },
-  {
-    id: "2",
-    name: "Marco Flotante Oro Rosa",
-    price: 125.00,
-    images: ["/images/frame-2.jpg"],
-    category: "Coleccion Bodas",
-    description: "Diseno flotante moderno en tono oro rosa que hace que tu foto parezca suspendida. Ideal para fotos de boda y retratos elegantes.",
-    dimensions: "15 x 20 cm",
-    material: "Metal oro rosa con vidrio",
-    features: ["Doble vidrio flotante", "Base giratoria", "Efecto 3D", "Empaque premium"],
-    isNew: true,
-  },
-  {
-    id: "3",
-    name: "Marco Barroco Vintage",
-    price: 145.00,
-    images: ["/images/frame-3.jpg"],
-    category: "Coleccion Clasica",
-    description: "Inspirado en el estilo barroco europeo, este marco presenta intrincados detalles tallados. Una pieza de arte en si misma.",
-    dimensions: "25 x 30 cm",
-    material: "Resina con acabado antiguo",
-    features: ["Detalles tallados", "Patina vintage", "Gran tamano", "Pieza de coleccion"],
-  },
-  {
-    id: "4",
-    name: "Marco Acrilico Moderno",
-    price: 75.00,
-    images: ["/images/frame-4.jpg"],
-    category: "Contemporaneo",
-    description: "Minimalismo y elegancia en un diseno transparente. Perfecto para espacios modernos y fotos artisticas.",
-    dimensions: "18 x 24 cm",
-    material: "Acrilico cristalino",
-    features: ["Diseño minimalista", "Magnetico", "Ultra ligero", "Facil cambio de foto"],
-    isNew: true,
-  },
-  {
-    id: "5",
-    name: "Marco Plata Grabado",
-    price: 165.00,
-    images: ["/images/frame-5.jpg"],
-    category: "Regalos Aniversario",
-    description: "Marco premium con opcion de grabado personalizado. El regalo perfecto para aniversarios con fecha o mensaje especial.",
-    dimensions: "20 x 25 cm",
-    material: "Metal banado en plata",
-    features: ["Grabado personalizado", "Acabado espejo", "Caja de lujo", "Certificado de autenticidad"],
-    isBestseller: true,
-  },
-  {
-    id: "6",
-    name: "Marco Vidrio Doble Cara",
-    price: 110.00,
-    images: ["/images/frame-6.jpg"],
-    category: "Marcos Premium",
-    description: "Innovador diseno que permite mostrar dos fotos, una de cada lado. Ideal para escritorios y mesas decorativas.",
-    dimensions: "15 x 20 cm",
-    material: "Vidrio con marco metalico",
-    features: ["Doble vista", "360° rotacion", "Base estable", "Versatil"],
-  },
-]
+import { inventoryApi } from "@/lib/api"
+import { useCart } from "@/contexts/cart-context"
+import type { ProductoResponse } from "@/lib/types"
 
 const frameSizes = [
   { id: "s", label: "Pequeno", dimensions: "15x20cm", priceModifier: 0 },
@@ -112,8 +42,10 @@ const frameSizes = [
 export default function ProductPage() {
   const params = useParams()
   const productId = params.id as string
-  const product = allProducts.find(p => p.id === productId) || allProducts[0]
   
+  const [product, setProduct] = useState<ProductoResponse | null>(null)
+  const [relatedProducts, setRelatedProducts] = useState<ProductoResponse[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [quantity, setQuantity] = useState(1)
   const [selectedSize, setSelectedSize] = useState("m")
   const [isLiked, setIsLiked] = useState(false)
@@ -127,8 +59,23 @@ export default function ProductPage() {
   const previewContainerRef = useRef<HTMLDivElement>(null)
   const dragStartRef = useRef({ x: 0, y: 0 })
 
+  const { addItem } = useCart()
+
+  useEffect(() => {
+    setIsLoading(true)
+    inventoryApi
+      .get(productId)
+      .then((p) => {
+        setProduct(p)
+        return inventoryApi.list({ limit: 5 })
+      })
+      .then((all) => setRelatedProducts(all.filter((p) => p.id !== productId).slice(0, 4)))
+      .catch(() => setProduct(null))
+      .finally(() => setIsLoading(false))
+  }, [productId])
+
   const selectedSizeData = frameSizes.find(s => s.id === selectedSize)!
-  const finalPrice = product.price + selectedSizeData.priceModifier
+  const finalPrice = product.precio + selectedSizeData.priceModifier
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -190,6 +137,32 @@ export default function ProductPage() {
     }
   }, [])
 
+  if (isLoading) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+          <span className="ml-3 text-muted-foreground">Cargando producto...</span>
+        </div>
+        <Footer />
+      </main>
+    )
+  }
+
+  if (!product) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <p className="text-xl text-muted-foreground">Producto no encontrado</p>
+          <Link href="/products" className="text-primary hover:underline">Volver a productos</Link>
+        </div>
+        <Footer />
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-background">
       <Header />
@@ -202,7 +175,7 @@ export default function ProductPage() {
             <ChevronRight className="h-4 w-4" />
             <Link href="/products" className="hover:text-primary transition-colors">Productos</Link>
             <ChevronRight className="h-4 w-4" />
-            <span className="text-foreground">{product.name}</span>
+            <span className="text-foreground">{product.nombre}</span>
           </nav>
 
           <div className="grid lg:grid-cols-2 gap-12">
@@ -224,8 +197,8 @@ export default function ProductPage() {
                   >
                     {/* Frame overlay */}
                     <Image
-                      src={product.images[0] || "/placeholder.svg"}
-                      alt={product.name}
+                      src={product.imagen_url || "/placeholder.svg"}
+                      alt={product.nombre}
                       fill
                       className="object-cover pointer-events-none z-10"
                       style={{ mixBlendMode: "multiply", opacity: 0.9 }}
@@ -255,8 +228,8 @@ export default function ProductPage() {
                   </div>
                 ) : (
                   <Image
-                    src={product.images[0] || "/placeholder.svg"}
-                    alt={product.name}
+                    src={product.imagen_url || "/placeholder.svg"}
+                    alt={product.nombre}
                     fill
                     className="object-cover"
                   />
@@ -264,14 +237,14 @@ export default function ProductPage() {
 
                 {/* Badges */}
                 <div className="absolute top-4 left-4 flex flex-col gap-2 z-20">
-                  {product.isNew && (
+                  {product.stock < 5 && product.stock > 0 && (
                     <span className="bg-accent text-accent-foreground text-xs font-medium px-3 py-1 rounded">
-                      NUEVO
+                      ULTIMAS {product.stock} UNIDADES
                     </span>
                   )}
-                  {product.isBestseller && (
-                    <span className="bg-primary text-primary-foreground text-xs font-medium px-3 py-1 rounded">
-                      MAS VENDIDO
+                  {product.stock === 0 && (
+                    <span className="bg-destructive text-destructive-foreground text-xs font-medium px-3 py-1 rounded">
+                      AGOTADO
                     </span>
                   )}
                 </div>
@@ -396,8 +369,8 @@ export default function ProductPage() {
             {/* Product Info */}
             <div className="space-y-6">
               <div>
-                <p className="text-accent font-medium tracking-wide text-sm mb-2">{product.category}</p>
-                <h1 className="font-serif text-3xl sm:text-4xl text-foreground mb-4">{product.name}</h1>
+                <p className="text-accent font-medium tracking-wide text-sm mb-2">{product.sku}</p>
+                <h1 className="font-serif text-3xl sm:text-4xl text-foreground mb-4">{product.nombre}</h1>
                 
                 {/* Rating */}
                 <div className="flex items-center gap-2 mb-4">
@@ -409,14 +382,14 @@ export default function ProductPage() {
                   <span className="text-sm text-muted-foreground">(48 resenas)</span>
                 </div>
 
-                <p className="text-muted-foreground leading-relaxed">{product.description}</p>
+                <p className="text-muted-foreground leading-relaxed">{product.descripcion}</p>
               </div>
 
               {/* Price */}
               <div className="flex items-baseline gap-3">
                 <span className="font-serif text-3xl text-foreground">${finalPrice.toFixed(2)}</span>
                 {selectedSizeData.priceModifier > 0 && (
-                  <span className="text-sm text-muted-foreground line-through">${product.price.toFixed(2)}</span>
+                  <span className="text-sm text-muted-foreground line-through">${product.precio.toFixed(2)}</span>
                 )}
               </div>
 
@@ -469,7 +442,7 @@ export default function ProductPage() {
                     </button>
                   </div>
                   <span className="text-sm text-muted-foreground">
-                    Stock disponible
+                    {product.stock > 0 ? `${product.stock} disponibles` : "Sin stock"}
                   </span>
                 </div>
               </div>
@@ -478,12 +451,20 @@ export default function ProductPage() {
               <div className="flex gap-4 pt-2">
                 <Button 
                   className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground h-12"
-                  asChild
+                  disabled={product.stock === 0}
+                  onClick={() => {
+                    addItem({
+                      id: product.id,
+                      nombre: product.nombre,
+                      precio: finalPrice,
+                      imagen_url: product.imagen_url,
+                      sku: product.sku,
+                      cantidad: quantity,
+                    })
+                  }}
                 >
-                  <Link href="/cart">
-                    <ShoppingBag className="h-5 w-5 mr-2" />
-                    Agregar al Carrito
-                  </Link>
+                  <ShoppingBag className="h-5 w-5 mr-2" />
+                  Agregar al Carrito
                 </Button>
                 <button
                   type="button"
@@ -522,25 +503,20 @@ export default function ProductPage() {
                 <h3 className="font-serif text-lg text-foreground">Detalles del Producto</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-muted-foreground">Dimensiones</p>
-                    <p className="text-foreground font-medium">{product.dimensions}</p>
+                    <p className="text-muted-foreground">SKU</p>
+                    <p className="text-foreground font-medium">{product.sku}</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">Material</p>
-                    <p className="text-foreground font-medium">{product.material}</p>
+                    <p className="text-muted-foreground">Moneda</p>
+                    <p className="text-foreground font-medium">{product.moneda}</p>
                   </div>
                 </div>
-                <div>
-                  <p className="text-muted-foreground text-sm mb-2">Caracteristicas</p>
-                  <ul className="space-y-2">
-                    {product.features.map((feature) => (
-                      <li key={feature} className="flex items-center gap-2 text-sm text-foreground">
-                        <Check className="h-4 w-4 text-primary flex-shrink-0" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                {product.descripcion && (
+                  <div>
+                    <p className="text-muted-foreground text-sm mb-2">Descripcion</p>
+                    <p className="text-sm text-foreground leading-relaxed">{product.descripcion}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -549,7 +525,7 @@ export default function ProductPage() {
           <div className="mt-20">
             <h2 className="font-serif text-2xl text-foreground mb-8">Productos Relacionados</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {allProducts.filter(p => p.id !== productId).slice(0, 4).map((relatedProduct) => (
+              {relatedProducts.map((relatedProduct) => (
                 <Link
                   key={relatedProduct.id}
                   href={`/product/${relatedProduct.id}`}
@@ -557,16 +533,16 @@ export default function ProductPage() {
                 >
                   <div className="relative aspect-square rounded-lg overflow-hidden mb-3">
                     <Image
-                      src={relatedProduct.images[0] || "/placeholder.svg"}
-                      alt={relatedProduct.name}
+                      src={relatedProduct.imagen_url || "/placeholder.svg"}
+                      alt={relatedProduct.nombre}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   </div>
                   <h3 className="font-medium text-foreground group-hover:text-primary transition-colors text-sm">
-                    {relatedProduct.name}
+                    {relatedProduct.nombre}
                   </h3>
-                  <p className="text-primary font-medium">${relatedProduct.price.toFixed(2)}</p>
+                  <p className="text-primary font-medium">${relatedProduct.precio.toFixed(2)}</p>
                 </Link>
               ))}
             </div>

@@ -5,6 +5,7 @@ import React from "react"
 import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -24,17 +25,9 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react"
-
-const cartItems = [
-  { id: "1", name: "Marco Romance Dorado", price: 89.00, quantity: 1, image: "/images/frame-1.jpg", size: "Mediano" },
-  { id: "2", name: "Marco Flotante Oro Rosa", price: 125.00, quantity: 1, image: "/images/frame-2.jpg", size: "Grande" },
-]
-
-const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-const shipping = subtotal >= 100 ? 0 : 5.99
-const total = subtotal + shipping
-
-type Step = "direccion" | "pago" | "confirmacion"
+import { useCart } from "@/contexts/cart-context"
+import { useAuth } from "@/contexts/auth-context"
+import { ordersApi, ApiError } from "@/lib/api"
 
 // Simulated locations for Ecuador
 const deliveryZones = [
@@ -48,7 +41,14 @@ const deliveryZones = [
 ]
 
 export default function PaymentPage() {
-  const [currentStep, setCurrentStep] = useState<Step>("direccion")
+  const router = useRouter()
+  const { items, subtotal, clearCart } = useCart()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
+
+  const shipping = subtotal >= 100 ? 0 : 5.99
+  const total = subtotal + shipping
+
+  const [currentStep, setCurrentStep] = useState<"direccion" | "pago" | "confirmacion">("direccion")
   const [isLocating, setIsLocating] = useState(false)
   const [mapCenter, setMapCenter] = useState({ lat: -0.1807, lng: -78.4678 })
   const [markerPosition, setMarkerPosition] = useState<{ lat: number; lng: number } | null>(null)
@@ -56,6 +56,8 @@ export default function PaymentPage() {
   const [addressSearch, setAddressSearch] = useState("")
   const [showZoneWarning, setShowZoneWarning] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [orderError, setOrderError] = useState<string | null>(null)
+  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null)
   
   const [addressData, setAddressData] = useState({
     fullName: "",
@@ -74,6 +76,20 @@ export default function PaymentPage() {
   })
 
   const mapRef = useRef<HTMLDivElement>(null)
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login")
+    }
+  }, [authLoading, isAuthenticated, router])
+
+  // Redirect to cart if cart is empty
+  useEffect(() => {
+    if (items.length === 0 && currentStep !== "confirmacion") {
+      router.push("/cart")
+    }
+  }, [items, currentStep, router])
 
   // Simulated geocoding
   const searchAddress = () => {
@@ -150,12 +166,39 @@ export default function PaymentPage() {
     }, 1500)
   }
 
-  const handleProcessPayment = () => {
+  const handleProcessPayment = async () => {
     setIsProcessing(true)
-    setTimeout(() => {
-      setIsProcessing(false)
+    setOrderError(null)
+    try {
+      const fullAddress = `${addressData.street}, ${addressData.city}${addressData.reference ? ` (${addressData.reference})` : ""}`
+      const coords = markerPosition ? `${markerPosition.lat},${markerPosition.lng}` : undefined
+
+      // 1. Create order
+      const order = await ordersApi.create({
+        items: items.map((item) => ({
+          producto_id: item.id,
+          variante: null,
+          cantidad: item.cantidad,
+          precio_unitario: item.precio,
+        })),
+        direccion_entrega: fullAddress,
+        coordenadas_entrega: coords,
+      })
+
+      // 2. Process payment
+      await ordersApi.pay(order.id, {
+        monto: order.total,
+        metodo_pago: `card_${paymentData.cardNumber.slice(-4)}`,
+      })
+
+      setCreatedOrderId(order.id)
+      clearCart()
       setCurrentStep("confirmacion")
-    }, 2000)
+    } catch (err) {
+      setOrderError(err instanceof ApiError ? err.message : "Error al procesar el pago. Intenta de nuevo.")
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const formatCardNumber = (value: string) => {
@@ -543,6 +586,12 @@ export default function PaymentPage() {
                     </div>
                   </div>
 
+                  {orderError && (
+                    <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive mb-4">
+                      {orderError}
+                    </div>
+                  )}
+
                   <div className="flex justify-between">
                     <Button
                       variant="outline"
@@ -585,7 +634,7 @@ export default function PaymentPage() {
                   
                   <div className="bg-secondary rounded-lg p-4 mb-6 max-w-sm mx-auto">
                     <p className="text-sm text-muted-foreground">Numero de Pedido</p>
-                    <p className="text-xl font-mono font-bold text-foreground">ORD-{Date.now().toString().slice(-6)}</p>
+                    <p className="text-xl font-mono font-bold text-foreground">{createdOrderId ? createdOrderId.slice(0, 13).toUpperCase() : "---"}</p>
                   </div>
 
                   <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground mb-8">
@@ -611,23 +660,23 @@ export default function PaymentPage() {
                 <h3 className="font-serif text-lg text-foreground mb-4">Resumen del Pedido</h3>
                 
                 <div className="space-y-4 mb-6">
-                  {cartItems.map((item) => (
+                  {items.map((item) => (
                     <div key={item.id} className="flex gap-3">
                       <div className="relative w-16 h-16 rounded overflow-hidden flex-shrink-0">
                         <Image
-                          src={item.image || "/placeholder.svg"}
-                          alt={item.name}
+                          src={item.imagen_url || "/placeholder.svg"}
+                          alt={item.nombre}
                           fill
                           className="object-cover"
                         />
                         <span className="absolute -top-1 -right-1 bg-foreground text-background text-xs w-5 h-5 rounded-full flex items-center justify-center">
-                          {item.quantity}
+                          {item.cantidad}
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">{item.size}</p>
-                        <p className="text-sm text-foreground">${item.price.toFixed(2)}</p>
+                        <p className="text-sm font-medium text-foreground truncate">{item.nombre}</p>
+                        <p className="text-xs text-muted-foreground">{item.sku}</p>
+                        <p className="text-sm text-foreground">${item.precio.toFixed(2)}</p>
                       </div>
                     </div>
                   ))}

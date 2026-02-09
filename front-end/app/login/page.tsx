@@ -2,30 +2,50 @@
 
 import React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Eye, EyeOff, ArrowLeft } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
+import { ApiError } from "@/lib/api"
 
 export default function LoginPage() {
+  const router = useRouter()
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   })
 
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push("/account")
+    }
+  }, [authLoading, isAuthenticated, router])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    // Simular login
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsLoading(false)
-    // Redirigir al dashboard
-    window.location.href = "/dashboard"
+    setError(null)
+    try {
+      await login(formData.email, formData.password)
+      window.location.href = "/account"
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message)
+      } else {
+        setError("Ocurrio un error inesperado. Intenta de nuevo.")
+      }
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -80,6 +100,13 @@ export default function LoginPage() {
               Ingresa tus credenciales para acceder a tu cuenta
             </p>
           </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="mb-6 rounded-md border border-red-500/50 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-6">

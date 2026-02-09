@@ -1,0 +1,432 @@
+version: "3.9"
+
+# ──────────────────────────────────────────────────────────────
+#  Mon Amour Studio – E-Commerce App Stack
+#  docker-compose up --build
+# ──────────────────────────────────────────────────────────────
+
+x-common-env: &common-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  OTLP_ENDPOINT: http://jaeger:4317
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+
+services:
+  # ── Traefik (Reverse Proxy + Web UI) ─────────────────────────
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    ports:
+      - "80:80"       # HTTP entrypoint
+      - "8080:8080"   # Dashboard / Web UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Frontend ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../front-end
+      dockerfile: Dockerfile
+    container_name: frontend
+    depends_on:
+      - usuarios
+      - inventario
+      - pedidos
+      - entregas
+      - campanas
+    labels:
+      - "traefik.enable=true"
+      # Catch-all rule: todo lo que NO sea /api/* va al frontend
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio Usuarios ───────────────────────────────────
+  usuarios:
+    build:
+      context: ../back-end/usuarios
+      dockerfile: Dockerfile
+    container_name: usuarios
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-usuarios:5432/usuarios
+      REDIS_URL: redis://redis:6379/0
+      MINIO_BUCKET: users
+      JWT_SECRET: super-secret-key-change-in-production
+      SERVICE_NAME: usuarios
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.usuarios.rule=PathPrefix(`/api/users/`)"
+      - "traefik.http.routers.usuarios.entrypoints=web"
+      - "traefik.http.routers.usuarios.priority=10"
+      - "traefik.http.routers.usuarios.middlewares=usuarios-strip,usuarios-addprefix"
+      - "traefik.http.middlewares.usuarios-strip.stripprefix.prefixes=/api/users"
+      - "traefik.http.middlewares.usuarios-addprefix.addprefix.prefix=/usuarios"
+      - "traefik.http.services.usuarios.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-usuarios:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio Inventario ─────────────────────────────────
+  inventario:
+    build:
+      context: ../back-end/inventario
+      dockerfile: Dockerfile
+    container_name: inventario
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-inventario:5432/inventario
+      MINIO_BUCKET: inventory
+      SERVICE_NAME: inventario
+      GRPC_PORT: "50052"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.inventario.rule=PathPrefix(`/api/inventory/`)"
+      - "traefik.http.routers.inventario.entrypoints=web"
+      - "traefik.http.routers.inventario.priority=10"
+      - "traefik.http.routers.inventario.middlewares=inventario-strip,inventario-addprefix"
+      - "traefik.http.middlewares.inventario-strip.stripprefix.prefixes=/api/inventory"
+      - "traefik.http.middlewares.inventario-addprefix.addprefix.prefix=/productos"
+      - "traefik.http.services.inventario.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-inventario:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio Pedidos ────────────────────────────────────
+  pedidos:
+    build:
+      context: ../back-end/pedidos
+      dockerfile: Dockerfile
+    container_name: pedidos
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-pedidos:5432/pedidos
+      MINIO_BUCKET: orders
+      JWT_SECRET: super-secret-key-change-in-production
+      SERVICE_NAME: pedidos
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pedidos.rule=PathPrefix(`/api/orders/`)"
+      - "traefik.http.routers.pedidos.entrypoints=web"
+      - "traefik.http.routers.pedidos.priority=10"
+      - "traefik.http.routers.pedidos.middlewares=pedidos-strip,pedidos-addprefix"
+      - "traefik.http.middlewares.pedidos-strip.stripprefix.prefixes=/api/orders"
+      - "traefik.http.middlewares.pedidos-addprefix.addprefix.prefix=/pedidos"
+      - "traefik.http.services.pedidos.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-pedidos:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio Entregas ───────────────────────────────────
+  entregas:
+    build:
+      context: ../back-end/entregas
+      dockerfile: Dockerfile
+    container_name: entregas
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-entregas:5432/entregas
+      MINIO_BUCKET: deliveries
+      SERVICE_NAME: entregas
+      GRPC_PORT: "50054"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.entregas.rule=PathPrefix(`/api/deliveries/`)"
+      - "traefik.http.routers.entregas.entrypoints=web"
+      - "traefik.http.routers.entregas.priority=10"
+      - "traefik.http.routers.entregas.middlewares=entregas-strip,entregas-addprefix"
+      - "traefik.http.middlewares.entregas-strip.stripprefix.prefixes=/api/deliveries"
+      - "traefik.http.middlewares.entregas-addprefix.addprefix.prefix=/entregas"
+      - "traefik.http.services.entregas.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-entregas:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio Campañas ───────────────────────────────────
+  campanas:
+    build:
+      context: ../back-end/campanas
+      dockerfile: Dockerfile
+    container_name: campanas
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres-campanas:5432/campanas
+      MINIO_BUCKET: campaigns
+      SERVICE_NAME: campanas
+    labels:
+      - "traefik.enable=true"
+      # Router 1: /api/campaigns/ → /campanas/
+      - "traefik.http.routers.campanas.rule=PathPrefix(`/api/campaigns/`)"
+      - "traefik.http.routers.campanas.entrypoints=web"
+      - "traefik.http.routers.campanas.priority=10"
+      - "traefik.http.routers.campanas.middlewares=campanas-strip,campanas-addprefix"
+      - "traefik.http.middlewares.campanas-strip.stripprefix.prefixes=/api/campaigns"
+      - "traefik.http.middlewares.campanas-addprefix.addprefix.prefix=/campanas"
+      # Router 2: /api/publications/ → /publicaciones/
+      - "traefik.http.routers.publicaciones.rule=PathPrefix(`/api/publications/`)"
+      - "traefik.http.routers.publicaciones.entrypoints=web"
+      - "traefik.http.routers.publicaciones.priority=10"
+      - "traefik.http.routers.publicaciones.middlewares=pub-strip,pub-addprefix"
+      - "traefik.http.middlewares.pub-strip.stripprefix.prefixes=/api/publications"
+      - "traefik.http.middlewares.pub-addprefix.addprefix.prefix=/publicaciones"
+      - "traefik.http.services.campanas.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-campanas:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Bases de Datos PostgreSQL ────────────────────────────────
+  postgres-usuarios:
+    image: postgres:16-alpine
+    container_name: postgres-usuarios
+    environment:
+      POSTGRES_DB: usuarios
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_usuarios_data:/var/lib/postgresql/data
+      - ../back-end/usuarios/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d usuarios"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-inventario:
+    image: postgres:16-alpine
+    container_name: postgres-inventario
+    environment:
+      POSTGRES_DB: inventario
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_inventario_data:/var/lib/postgresql/data
+      - ../back-end/inventario/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventario"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-pedidos:
+    image: postgres:16-alpine
+    container_name: postgres-pedidos
+    environment:
+      POSTGRES_DB: pedidos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_pedidos_data:/var/lib/postgresql/data
+      - ../back-end/pedidos/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pedidos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-entregas:
+    image: postgres:16-alpine
+    container_name: postgres-entregas
+    environment:
+      POSTGRES_DB: entregas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_entregas_data:/var/lib/postgresql/data
+      - ../back-end/entregas/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d entregas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-campanas:
+    image: postgres:16-alpine
+    container_name: postgres-campanas
+    environment:
+      POSTGRES_DB: campanas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_campanas_data:/var/lib/postgresql/data
+      - ../back-end/campanas/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d campanas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Redis (sesiones de Usuarios) ─────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── MinIO (Object Storage compartido con buckets por servicio)
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5;
+        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc mb --ignore-existing local/users;
+        mc mb --ignore-existing local/inventory;
+        mc mb --ignore-existing local/orders;
+        mc mb --ignore-existing local/deliveries;
+        mc mb --ignore-existing local/campaigns;
+        echo 'Buckets created successfully';
+      "
+    networks:
+      - ecommerce_net
+
+  # ── Kafka (KRaft mode – sin Zookeeper) ──────────────────────
+  kafka:
+    image: bitnamilegacy/kafka:3.7
+    container_name: kafka
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+    volumes:
+      - kafka_data:/bitnamilegacy/kafka
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Prometheus (métricas) ────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Grafana (visualización) ──────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    depends_on:
+      - prometheus
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Jaeger (tracing OpenTelemetry) ──────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+# ── Redes ──────────────────────────────────────────────────────
+networks:
+  ecommerce_net:
+    driver: bridge
+
+# ── Volúmenes ─────────────────────────────────────────────────
+volumes:
+  pg_usuarios_data:
+  pg_inventario_data:
+  pg_pedidos_data:
+  pg_entregas_data:
+  pg_campanas_data:
+  redis_data:
+  minio_data:
+  kafka_data:
+  prometheus_data:
+  grafana_data:

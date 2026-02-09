@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package deliveries;
+
+// ── Service ──────────────────────────────────────────────────────────────────
+
+service DeliveryService {
+  rpc Schedule     (ScheduleRequest)      returns (ScheduleResponse);
+  rpc GetDelivery  (GetDeliveryRequest)   returns (DeliveryResponse);
+  rpc UpdateStatus (UpdateStatusRequest)  returns (DeliveryResponse);
+}
+
+// ── Schedule ─────────────────────────────────────────────────────────────────
+
+message ScheduleRequest {
+  string pedido_id         = 1;
+  string direccion         = 2;
+  string fecha_programada  = 3;  // ISO-8601 datetime (optional, empty = auto)
+}
+
+message ScheduleResponse {
+  bool   success     = 1;
+  string message     = 2;
+  string entrega_id  = 3;
+  string guia        = 4;
+}
+
+// ── Get Delivery ─────────────────────────────────────────────────────────────
+
+message GetDeliveryRequest {
+  string entrega_id = 1;
+}
+
+// ── Update Status ────────────────────────────────────────────────────────────
+
+message UpdateStatusRequest {
+  string entrega_id = 1;
+  string estado     = 2;
+  string notas      = 3;  // optional
+}
+
+// ── Shared Response ──────────────────────────────────────────────────────────
+
+message DeliveryResponse {
+  string entrega_id        = 1;
+  string pedido_id         = 2;
+  string estado            = 3;
+  string guia              = 4;
+  string fecha_programada  = 5;  // ISO-8601 datetime
+  string fecha_entrega     = 6;  // ISO-8601 datetime (empty if not delivered)
+  string direccion         = 7;
+  string notas             = 8;
+  string created_at        = 9;  // ISO-8601 datetime
+}

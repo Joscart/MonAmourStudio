@@ -1,13 +1,16 @@
 "use client"
 
-import { useState } from "react"
-import Image from "next/image"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useAuth } from "@/contexts/auth-context"
+import { ordersApi, usersApi, ApiError } from "@/lib/api"
+import type { PedidoResponse } from "@/lib/types"
 import {
   User,
   Package,
@@ -18,6 +21,7 @@ import {
   CreditCard,
   ChevronRight,
   Edit2,
+  Loader2,
 } from "lucide-react"
 
 const menuItems = [
@@ -29,43 +33,57 @@ const menuItems = [
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
 
-const orders = [
-  {
-    id: "ORD-001",
-    date: "15 Ene 2026",
-    status: "Entregado",
-    total: 214.00,
-    items: [
-      { name: "Marco Romance Dorado", image: "/images/frame-1.jpg", quantity: 1, price: 89.00 },
-      { name: "Marco Flotante Oro Rosa", image: "/images/frame-2.jpg", quantity: 1, price: 125.00 },
-    ],
-  },
-  {
-    id: "ORD-002",
-    date: "28 Dic 2025",
-    status: "En camino",
-    total: 145.00,
-    items: [
-      { name: "Marco Barroco Vintage", image: "/images/frame-3.jpg", quantity: 1, price: 145.00 },
-    ],
-  },
-]
-
-const favorites = [
-  { id: "1", name: "Marco Romance Dorado", price: 89.00, image: "/images/frame-1.jpg" },
-  { id: "4", name: "Marco Acrilico Moderno", price: 75.00, image: "/images/frame-4.jpg" },
-  { id: "5", name: "Marco Plata Grabado", price: 165.00, image: "/images/frame-5.jpg" },
-]
-
 export default function AccountPage() {
+  const router = useRouter()
+  const { user, isAuthenticated, isLoading: authLoading, logout, refreshUser } = useAuth()
   const [activeSection, setActiveSection] = useState("perfil")
   const [isEditing, setIsEditing] = useState(false)
-  const [userData, setUserData] = useState({
-    firstName: "Maria",
-    lastName: "Garcia",
-    email: "maria.garcia@correo.com",
-    phone: "+593 99 123 4567",
-  })
+  const [nombre, setNombre] = useState("")
+  const [email, setEmail] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [orders, setOrders] = useState<PedidoResponse[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login")
+    }
+  }, [authLoading, isAuthenticated, router])
+
+  // Sync form fields when user loads
+  useEffect(() => {
+    if (user) {
+      setNombre(user.nombre)
+      setEmail(user.email)
+    }
+  }, [user])
+
+  // Fetch orders when orders tab is active
+  useEffect(() => {
+    if (activeSection === "pedidos" && isAuthenticated) {
+      setOrdersLoading(true)
+      ordersApi.list()
+        .then(setOrders)
+        .catch(() => {})
+        .finally(() => setOrdersLoading(false))
+    }
+  }, [activeSection, isAuthenticated])
+
+  const handleSaveProfile = async () => {
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await usersApi.updateMe({ nombre, email })
+      await refreshUser()
+      setIsEditing(false)
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Error al guardar")
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -80,6 +98,18 @@ export default function AccountPage() {
     }
   }
 
+  if (authLoading || !user) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <Footer />
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-background">
       <Header />
@@ -92,7 +122,7 @@ export default function AccountPage() {
               Mi Cuenta
             </h1>
             <p className="text-muted-foreground">
-              Bienvenida, {userData.firstName}. Administra tu cuenta y revisa tus pedidos.
+              Bienvenida, {user.nombre}. Administra tu cuenta y revisa tus pedidos.
             </p>
           </div>
 
@@ -107,9 +137,9 @@ export default function AccountPage() {
                   </div>
                   <div>
                     <p className="font-medium text-foreground">
-                      {userData.firstName} {userData.lastName}
+                      {user.nombre}
                     </p>
-                    <p className="text-sm text-muted-foreground">{userData.email}</p>
+                    <p className="text-sm text-muted-foreground">{user.email}</p>
                   </div>
                 </div>
 
@@ -132,6 +162,7 @@ export default function AccountPage() {
                   ))}
                   <button
                     type="button"
+                    onClick={() => { logout(); router.push("/") }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-destructive hover:bg-destructive/10 transition-colors mt-4"
                   >
                     <LogOut className="h-4 w-4" />
@@ -161,21 +192,11 @@ export default function AccountPage() {
 
                   <div className="grid sm:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <Label htmlFor="firstName">Nombre</Label>
+                      <Label htmlFor="nombre">Nombre</Label>
                       <Input
-                        id="firstName"
-                        value={userData.firstName}
-                        onChange={(e) => setUserData({ ...userData, firstName: e.target.value })}
-                        disabled={!isEditing}
-                        className="bg-background border-border"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lastName">Apellido</Label>
-                      <Input
-                        id="lastName"
-                        value={userData.lastName}
-                        onChange={(e) => setUserData({ ...userData, lastName: e.target.value })}
+                        id="nombre"
+                        value={nombre}
+                        onChange={(e) => setNombre(e.target.value)}
                         disabled={!isEditing}
                         className="bg-background border-border"
                       />
@@ -185,28 +206,26 @@ export default function AccountPage() {
                       <Input
                         id="email"
                         type="email"
-                        value={userData.email}
-                        onChange={(e) => setUserData({ ...userData, email: e.target.value })}
-                        disabled={!isEditing}
-                        className="bg-background border-border"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Telefono</Label>
-                      <Input
-                        id="phone"
-                        value={userData.phone}
-                        onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         disabled={!isEditing}
                         className="bg-background border-border"
                       />
                     </div>
                   </div>
 
+                  {saveError && (
+                    <p className="mt-4 text-sm text-destructive">{saveError}</p>
+                  )}
+
                   {isEditing && (
                     <div className="mt-6 flex gap-3">
-                      <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                        Guardar Cambios
+                      <Button
+                        onClick={handleSaveProfile}
+                        disabled={isSaving}
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                      >
+                        {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : "Guardar Cambios"}
                       </Button>
                     </div>
                   )}
@@ -217,48 +236,61 @@ export default function AccountPage() {
               {activeSection === "pedidos" && (
                 <div className="space-y-4">
                   <h2 className="font-serif text-xl text-foreground mb-4">Mis Pedidos</h2>
-                  {orders.map((order) => (
-                    <div
-                      key={order.id}
-                      className="bg-card rounded-lg border border-border p-6"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                        <div>
-                          <p className="font-medium text-foreground">{order.id}</p>
-                          <p className="text-sm text-muted-foreground">{order.date}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                            {order.status}
-                          </span>
-                          <span className="font-medium text-foreground">${order.total.toFixed(2)}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {order.items.map((item) => (
-                          <div key={item.name} className="flex items-center gap-4">
-                            <div className="relative w-16 h-16 rounded overflow-hidden flex-shrink-0">
-                              <Image
-                                src={item.image || "/placeholder.svg"}
-                                alt={item.name}
-                                fill
-                                className="object-cover"
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
-                              <p className="text-sm text-muted-foreground">Cantidad: {item.quantity}</p>
-                            </div>
-                            <p className="text-sm font-medium text-foreground">${item.price.toFixed(2)}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <Button variant="outline" size="sm" className="mt-4 bg-transparent">
-                        Ver Detalles
-                        <ChevronRight className="h-4 w-4 ml-1" />
+                  {ordersLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div className="text-center py-12 bg-secondary rounded-lg">
+                      <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-muted-foreground">Aun no tienes pedidos.</p>
+                      <Button asChild className="mt-4 bg-primary hover:bg-primary/90 text-primary-foreground">
+                        <Link href="/products">Explorar Productos</Link>
                       </Button>
                     </div>
-                  ))}
+                  ) : (
+                    orders.map((order) => (
+                      <div
+                        key={order.id}
+                        className="bg-card rounded-lg border border-border p-6"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                          <div>
+                            <p className="font-medium text-foreground">Pedido #{order.id}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(order.fecha_creacion).toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" })}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
+                              {order.estado}
+                            </span>
+                            <span className="font-medium text-foreground">${order.total.toFixed(2)}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          {order.items.map((item) => (
+                            <div key={item.id} className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center flex-shrink-0">
+                                <Package className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">Producto #{item.producto_id}</p>
+                                <p className="text-sm text-muted-foreground">Cantidad: {item.cantidad}</p>
+                              </div>
+                              <p className="text-sm font-medium text-foreground">${item.precio_unitario.toFixed(2)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <Button asChild variant="outline" size="sm" className="mt-4 bg-transparent">
+                          <Link href="/orders">
+                            Ver Detalles
+                            <ChevronRight className="h-4 w-4 ml-1" />
+                          </Link>
+                        </Button>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 
@@ -266,41 +298,18 @@ export default function AccountPage() {
               {activeSection === "favoritos" && (
                 <div>
                   <h2 className="font-serif text-xl text-foreground mb-4">Mis Favoritos</h2>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {favorites.map((item) => (
-                      <div
-                        key={item.id}
-                        className="bg-card rounded-lg border border-border overflow-hidden group"
-                      >
-                        <div className="relative aspect-square">
-                          <Image
-                            src={item.image || "/placeholder.svg"}
-                            alt={item.name}
-                            fill
-                            className="object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                        </div>
-                        <div className="p-4">
-                          <h3 className="font-medium text-foreground mb-1">{item.name}</h3>
-                          <p className="text-primary font-medium">${item.price.toFixed(2)}</p>
-                          <Button size="sm" className="w-full mt-3 bg-primary hover:bg-primary/90 text-primary-foreground">
-                            Agregar al Carrito
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="text-center py-12 bg-secondary rounded-lg">
+                    <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">
+                      Los favoritos se guardan localmente en tu navegador.
+                    </p>
+                    <p className="text-muted-foreground mt-1">
+                      Aun no tienes productos favoritos.
+                    </p>
+                    <Button asChild className="mt-4 bg-primary hover:bg-primary/90 text-primary-foreground">
+                      <Link href="/products">Explorar Productos</Link>
+                    </Button>
                   </div>
-                  {favorites.length === 0 && (
-                    <div className="text-center py-12 bg-secondary rounded-lg">
-                      <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                      <p className="text-muted-foreground">
-                        Aun no tienes productos favoritos.
-                      </p>
-                      <Button asChild className="mt-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-                        <Link href="/products">Explorar Productos</Link>
-                      </Button>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -405,7 +414,12 @@ export default function AccountPage() {
                         <p className="font-medium text-destructive">Eliminar Cuenta</p>
                         <p className="text-sm text-muted-foreground">Esta accion es irreversible</p>
                       </div>
-                      <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10 bg-transparent">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 bg-transparent"
+                        onClick={() => alert("Contacta a soporte para eliminar tu cuenta.")}
+                      >
                         Eliminar
                       </Button>
                     </div>

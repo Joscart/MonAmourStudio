@@ -1,6 +1,7 @@
 import React from "react"
 import type { Metadata } from 'next'
 import { Playfair_Display, Lato } from 'next/font/google'
+import { Providers } from './providers'
 
 import './globals.css'
 
@@ -27,7 +28,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${playfair.variable} ${lato.variable} font-sans antialiased`}>{children}</body>
+      <body className={`${playfair.variable} ${lato.variable} font-sans antialiased`}>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   )
 }

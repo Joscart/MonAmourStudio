@@ -1,12 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useAuth } from "@/contexts/auth-context"
+import { inventoryApi, ordersApi, usersApi } from "@/lib/api"
+import type { ProductoResponse, PedidoResponse, UsuarioResponse } from "@/lib/types"
 import {
   LayoutDashboard,
   Package,
@@ -24,6 +28,7 @@ import {
   ChevronDown,
   BarChart3,
   Calendar,
+  Loader2,
 } from "lucide-react"
 
 const menuItems = [
@@ -35,63 +40,52 @@ const menuItems = [
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
 
-const statsCards = [
-  { label: "Ventas del Mes", value: "$12,450", change: "+12.5%", icon: DollarSign, trend: "up" },
-  { label: "Pedidos Nuevos", value: "48", change: "+8.2%", icon: ShoppingCart, trend: "up" },
-  { label: "Clientes Activos", value: "324", change: "+5.1%", icon: Users, trend: "up" },
-  { label: "Visitas", value: "2,841", change: "-2.4%", icon: Eye, trend: "down" },
-]
-
-const recentOrders = [
-  { id: "ORD-001", cliente: "Maria Garcia", fecha: "15 Ene 2026", total: 214.00, estado: "Pendiente", items: 2 },
-  { id: "ORD-002", cliente: "Carlos Lopez", fecha: "15 Ene 2026", total: 145.00, estado: "En Proceso", items: 1 },
-  { id: "ORD-003", cliente: "Ana Rodriguez", fecha: "14 Ene 2026", total: 320.00, estado: "Enviado", items: 3 },
-  { id: "ORD-004", cliente: "Pedro Sanchez", fecha: "14 Ene 2026", total: 89.00, estado: "Entregado", items: 1 },
-  { id: "ORD-005", cliente: "Sofia Martinez", fecha: "13 Ene 2026", total: 275.00, estado: "Entregado", items: 2 },
-]
-
-const allOrders = [
-  { id: "ORD-001", cliente: "Maria Garcia", email: "maria@correo.com", fecha: "15 Ene 2026", total: 214.00, estado: "Pendiente", items: 2 },
-  { id: "ORD-002", cliente: "Carlos Lopez", email: "carlos@correo.com", fecha: "15 Ene 2026", total: 145.00, estado: "En Proceso", items: 1 },
-  { id: "ORD-003", cliente: "Ana Rodriguez", email: "ana@correo.com", fecha: "14 Ene 2026", total: 320.00, estado: "Enviado", items: 3 },
-  { id: "ORD-004", cliente: "Pedro Sanchez", email: "pedro@correo.com", fecha: "14 Ene 2026", total: 89.00, estado: "Entregado", items: 1 },
-  { id: "ORD-005", cliente: "Sofia Martinez", email: "sofia@correo.com", fecha: "13 Ene 2026", total: 275.00, estado: "Entregado", items: 2 },
-  { id: "ORD-006", cliente: "Luis Herrera", email: "luis@correo.com", fecha: "12 Ene 2026", total: 165.00, estado: "Entregado", items: 1 },
-]
-
-const products = [
-  { id: "1", name: "Marco Romance Dorado", price: 89.00, stock: 24, category: "Marcos Premium", image: "/images/frame-1.jpg", status: "activo" },
-  { id: "2", name: "Marco Flotante Oro Rosa", price: 125.00, stock: 15, category: "Coleccion Bodas", image: "/images/frame-2.jpg", status: "activo" },
-  { id: "3", name: "Marco Barroco Vintage", price: 145.00, stock: 8, category: "Coleccion Clasica", image: "/images/frame-3.jpg", status: "activo" },
-  { id: "4", name: "Marco Acrilico Moderno", price: 75.00, stock: 32, category: "Contemporaneo", image: "/images/frame-4.jpg", status: "activo" },
-  { id: "5", name: "Marco Plata Grabado", price: 165.00, stock: 0, category: "Regalos Aniversario", image: "/images/frame-5.jpg", status: "agotado" },
-  { id: "6", name: "Marco Vidrio Doble Cara", price: 110.00, stock: 18, category: "Marcos Premium", image: "/images/frame-6.jpg", status: "activo" },
-]
-
-const customers = [
-  { id: "1", name: "Maria Garcia", email: "maria@correo.com", pedidos: 5, totalGastado: 845.00, fechaRegistro: "10 Nov 2025" },
-  { id: "2", name: "Carlos Lopez", email: "carlos@correo.com", pedidos: 3, totalGastado: 420.00, fechaRegistro: "22 Dic 2025" },
-  { id: "3", name: "Ana Rodriguez", email: "ana@correo.com", pedidos: 8, totalGastado: 1250.00, fechaRegistro: "5 Sep 2025" },
-  { id: "4", name: "Pedro Sanchez", email: "pedro@correo.com", pedidos: 2, totalGastado: 234.00, fechaRegistro: "3 Ene 2026" },
-  { id: "5", name: "Sofia Martinez", email: "sofia@correo.com", pedidos: 6, totalGastado: 980.00, fechaRegistro: "18 Oct 2025" },
-]
-
 export default function AdminDashboard() {
+  const router = useRouter()
+  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth()
   const [activeSection, setActiveSection] = useState("resumen")
   const [searchQuery, setSearchQuery] = useState("")
   const [orderFilter, setOrderFilter] = useState("todos")
 
+  const [products, setProducts] = useState<ProductoResponse[]>([])
+  const [orders, setOrders] = useState<PedidoResponse[]>([])
+  const [customers, setCustomers] = useState<UsuarioResponse[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login")
+      return
+    }
+    if (!isAuthenticated) return
+    setIsLoading(true)
+    Promise.all([
+      inventoryApi.list(),
+      ordersApi.list(),
+      usersApi.listAll().catch(() => [] as UsuarioResponse[]),
+    ])
+      .then(([prods, ords, custs]) => {
+        setProducts(prods)
+        setOrders(ords)
+        setCustomers(custs)
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false))
+  }, [authLoading, isAuthenticated, router])
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Entregado":
+      case "entregado":
         return "bg-green-100 text-green-700"
-      case "Enviado":
+      case "enviado":
         return "bg-blue-100 text-blue-700"
-      case "En Proceso":
+      case "procesando":
         return "bg-yellow-100 text-yellow-700"
-      case "Pendiente":
+      case "confirmado":
+        return "bg-cyan-100 text-cyan-700"
+      case "pendiente":
         return "bg-orange-100 text-orange-700"
-      case "Cancelado":
+      case "cancelado":
         return "bg-red-100 text-red-700"
       default:
         return "bg-gray-100 text-gray-700"
@@ -104,9 +98,46 @@ export default function AdminDashboard() {
     return { label: "Disponible", class: "bg-green-100 text-green-700" }
   }
 
-  const filteredOrders = orderFilter === "todos" 
-    ? allOrders 
-    : allOrders.filter(o => o.estado.toLowerCase() === orderFilter.toLowerCase())
+  const totalRevenue = orders.reduce((s, o) => s + o.total, 0)
+  const pendingOrders = orders.filter((o) =>
+    ["pendiente", "confirmado", "procesando"].includes(o.estado),
+  ).length
+
+  const statsCards = [
+    { label: "Ingresos Totales", value: `$${totalRevenue.toFixed(2)}`, icon: DollarSign },
+    { label: "Pedidos Totales", value: String(orders.length), icon: ShoppingCart },
+    { label: "Clientes", value: String(customers.length), icon: Users },
+    { label: "Productos", value: String(products.length), icon: Package },
+  ]
+
+  const filteredOrders =
+    orderFilter === "todos"
+      ? orders
+      : orders.filter((o) => o.estado === orderFilter)
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString("es-EC", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    } catch {
+      return iso
+    }
+  }
+
+  if (isLoading || authLoading) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+        <Footer />
+      </main>
+    )
+  }
 
   return (
     <main className="min-h-screen bg-background">
@@ -120,7 +151,7 @@ export default function AdminDashboard() {
               Panel de Administracion
             </h1>
             <p className="text-muted-foreground">
-              Bienvenido, Administrador. Gestiona tu tienda desde aqui.
+              Bienvenido, {user?.nombre ?? "Administrador"}. Gestiona tu tienda desde aqui.
             </p>
           </div>
 
@@ -131,11 +162,13 @@ export default function AdminDashboard() {
                 {/* Admin Info */}
                 <div className="flex items-center gap-4 pb-4 border-b border-border mb-4">
                   <div className="w-12 h-12 rounded-full bg-accent flex items-center justify-center">
-                    <span className="text-accent-foreground font-bold text-lg">A</span>
+                    <span className="text-accent-foreground font-bold text-lg">
+                      {user?.nombre?.charAt(0)?.toUpperCase() ?? "A"}
+                    </span>
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Admin</p>
-                    <p className="text-xs text-muted-foreground">Super Administrador</p>
+                    <p className="font-medium text-foreground">{user?.nombre ?? "Admin"}</p>
+                    <p className="text-xs text-muted-foreground">{user?.email ?? ""}</p>
                   </div>
                 </div>
 
@@ -158,6 +191,10 @@ export default function AdminDashboard() {
                   ))}
                   <button
                     type="button"
+                    onClick={() => {
+                      logout()
+                      router.push("/")
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-destructive hover:bg-destructive/10 transition-colors mt-4"
                   >
                     <LogOut className="h-4 w-4" />
@@ -180,11 +217,6 @@ export default function AdminDashboard() {
                           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                             <stat.icon className="h-5 w-5 text-primary" />
                           </div>
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${
-                            stat.trend === "up" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                          }`}>
-                            {stat.change}
-                          </span>
                         </div>
                         <p className="text-2xl font-bold text-foreground">{stat.value}</p>
                         <p className="text-sm text-muted-foreground">{stat.label}</p>
@@ -210,18 +242,18 @@ export default function AdminDashboard() {
                         <thead className="bg-secondary/50">
                           <tr>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">ID Pedido</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Cliente</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Items</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Fecha</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Total</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Estado</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {recentOrders.map((order) => (
+                          {orders.slice(0, 5).map((order) => (
                             <tr key={order.id} className="hover:bg-secondary/30 transition-colors">
-                              <td className="px-5 py-4 text-sm font-medium text-foreground">{order.id}</td>
-                              <td className="px-5 py-4 text-sm text-foreground">{order.cliente}</td>
-                              <td className="px-5 py-4 text-sm text-muted-foreground">{order.fecha}</td>
+                              <td className="px-5 py-4 text-sm font-medium text-foreground">{order.id.slice(0, 8)}</td>
+                              <td className="px-5 py-4 text-sm text-foreground">{order.items.length}</td>
+                              <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(order.fecha_creacion)}</td>
                               <td className="px-5 py-4 text-sm font-medium text-foreground">${order.total.toFixed(2)}</td>
                               <td className="px-5 py-4">
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
@@ -230,6 +262,13 @@ export default function AdminDashboard() {
                               </td>
                             </tr>
                           ))}
+                          {orders.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                No hay pedidos registrados.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -287,7 +326,8 @@ export default function AdminDashboard() {
                         >
                           <option value="todos">Todos</option>
                           <option value="pendiente">Pendiente</option>
-                          <option value="en proceso">En Proceso</option>
+                          <option value="confirmado">Confirmado</option>
+                          <option value="procesando">Procesando</option>
                           <option value="enviado">Enviado</option>
                           <option value="entregado">Entregado</option>
                         </select>
@@ -302,7 +342,7 @@ export default function AdminDashboard() {
                         <thead className="bg-secondary/50">
                           <tr>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">ID</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Cliente</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Direccion</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Fecha</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Items</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Total</th>
@@ -313,13 +353,14 @@ export default function AdminDashboard() {
                         <tbody className="divide-y divide-border">
                           {filteredOrders.map((order) => (
                             <tr key={order.id} className="hover:bg-secondary/30 transition-colors">
-                              <td className="px-5 py-4 text-sm font-medium text-foreground">{order.id}</td>
+                              <td className="px-5 py-4 text-sm font-medium text-foreground">{order.id.slice(0, 8)}</td>
                               <td className="px-5 py-4">
-                                <p className="text-sm font-medium text-foreground">{order.cliente}</p>
-                                <p className="text-xs text-muted-foreground">{order.email}</p>
+                                <p className="text-sm text-foreground truncate max-w-[180px]" title={order.direccion_entrega}>
+                                  {order.direccion_entrega}
+                                </p>
                               </td>
-                              <td className="px-5 py-4 text-sm text-muted-foreground">{order.fecha}</td>
-                              <td className="px-5 py-4 text-sm text-foreground">{order.items}</td>
+                              <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(order.fecha_creacion)}</td>
+                              <td className="px-5 py-4 text-sm text-foreground">{order.items.length}</td>
                               <td className="px-5 py-4 text-sm font-medium text-foreground">${order.total.toFixed(2)}</td>
                               <td className="px-5 py-4">
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
@@ -338,6 +379,13 @@ export default function AdminDashboard() {
                               </td>
                             </tr>
                           ))}
+                          {filteredOrders.length === 0 && (
+                            <tr>
+                              <td colSpan={7} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                No hay pedidos para mostrar.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -371,7 +419,7 @@ export default function AdminDashboard() {
                         <thead className="bg-secondary/50">
                           <tr>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Producto</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Categoria</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">SKU</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Precio</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Stock</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Estado</th>
@@ -387,17 +435,17 @@ export default function AdminDashboard() {
                                   <div className="flex items-center gap-3">
                                     <div className="relative w-12 h-12 rounded overflow-hidden flex-shrink-0">
                                       <Image
-                                        src={product.image || "/placeholder.svg"}
-                                        alt={product.name}
+                                        src={product.imagen_url || "/placeholder.svg"}
+                                        alt={product.nombre}
                                         fill
                                         className="object-cover"
                                       />
                                     </div>
-                                    <span className="text-sm font-medium text-foreground">{product.name}</span>
+                                    <span className="text-sm font-medium text-foreground">{product.nombre}</span>
                                   </div>
                                 </td>
-                                <td className="px-5 py-4 text-sm text-muted-foreground">{product.category}</td>
-                                <td className="px-5 py-4 text-sm font-medium text-foreground">${product.price.toFixed(2)}</td>
+                                <td className="px-5 py-4 text-sm text-muted-foreground">{product.sku}</td>
+                                <td className="px-5 py-4 text-sm font-medium text-foreground">${product.precio.toFixed(2)}</td>
                                 <td className="px-5 py-4 text-sm text-foreground">{product.stock}</td>
                                 <td className="px-5 py-4">
                                   <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${stockStatus.class}`}>
@@ -417,6 +465,13 @@ export default function AdminDashboard() {
                               </tr>
                             )
                           })}
+                          {products.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                No hay productos registrados.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -444,8 +499,7 @@ export default function AdminDashboard() {
                         <thead className="bg-secondary/50">
                           <tr>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Cliente</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Pedidos</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Total Gastado</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Rol</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Registro</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Acciones</th>
                           </tr>
@@ -454,12 +508,11 @@ export default function AdminDashboard() {
                           {customers.map((customer) => (
                             <tr key={customer.id} className="hover:bg-secondary/30 transition-colors">
                               <td className="px-5 py-4">
-                                <p className="text-sm font-medium text-foreground">{customer.name}</p>
+                                <p className="text-sm font-medium text-foreground">{customer.nombre}</p>
                                 <p className="text-xs text-muted-foreground">{customer.email}</p>
                               </td>
-                              <td className="px-5 py-4 text-sm text-foreground">{customer.pedidos}</td>
-                              <td className="px-5 py-4 text-sm font-medium text-foreground">${customer.totalGastado.toFixed(2)}</td>
-                              <td className="px-5 py-4 text-sm text-muted-foreground">{customer.fechaRegistro}</td>
+                              <td className="px-5 py-4 text-sm text-foreground capitalize">{customer.rol}</td>
+                              <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(customer.created_at)}</td>
                               <td className="px-5 py-4">
                                 <Button variant="outline" size="sm" className="bg-transparent">
                                   <Eye className="h-4 w-4 mr-2" />
@@ -468,6 +521,13 @@ export default function AdminDashboard() {
                               </td>
                             </tr>
                           ))}
+                          {customers.length === 0 && (
+                            <tr>
+                              <td colSpan={4} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                No hay clientes registrados.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -484,46 +544,71 @@ export default function AdminDashboard() {
                     {/* Sales Chart Placeholder */}
                     <div className="bg-card rounded-lg border border-border p-5">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-medium text-foreground">Ventas Mensuales</h3>
+                        <h3 className="font-medium text-foreground">Resumen de Pedidos</h3>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Calendar className="h-4 w-4" />
-                          Ultimos 6 meses
+                          Datos actuales
                         </div>
                       </div>
-                      <div className="h-48 flex items-end justify-between gap-2 pt-4">
-                        {[65, 45, 78, 90, 82, 95].map((value, i) => (
-                          <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                            <div 
-                              className="w-full bg-primary/80 rounded-t"
-                              style={{ height: `${value}%` }}
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {["Ago", "Sep", "Oct", "Nov", "Dic", "Ene"][i]}
-                            </span>
-                          </div>
-                        ))}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center p-4 bg-secondary/30 rounded-lg">
+                          <p className="text-2xl font-bold text-foreground">{orders.length}</p>
+                          <p className="text-xs text-muted-foreground">Total Pedidos</p>
+                        </div>
+                        <div className="text-center p-4 bg-secondary/30 rounded-lg">
+                          <p className="text-2xl font-bold text-foreground">{pendingOrders}</p>
+                          <p className="text-xs text-muted-foreground">Pendientes</p>
+                        </div>
+                        <div className="text-center p-4 bg-secondary/30 rounded-lg">
+                          <p className="text-2xl font-bold text-foreground">${totalRevenue.toFixed(2)}</p>
+                          <p className="text-xs text-muted-foreground">Ingresos</p>
+                        </div>
+                        <div className="text-center p-4 bg-secondary/30 rounded-lg">
+                          <p className="text-2xl font-bold text-foreground">
+                            ${orders.length > 0 ? (totalRevenue / orders.length).toFixed(2) : "0.00"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">Ticket Promedio</p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Category Distribution */}
+                    {/* Stock Overview */}
                     <div className="bg-card rounded-lg border border-border p-5">
-                      <h3 className="font-medium text-foreground mb-4">Ventas por Categoria</h3>
+                      <h3 className="font-medium text-foreground mb-4">Estado del Inventario</h3>
                       <div className="space-y-4">
                         {[
-                          { name: "Marcos Premium", value: 42, color: "bg-primary" },
-                          { name: "Coleccion Bodas", value: 28, color: "bg-accent" },
-                          { name: "Regalos Aniversario", value: 18, color: "bg-primary/60" },
-                          { name: "Contemporaneo", value: 12, color: "bg-accent/60" },
+                          {
+                            name: "Disponible",
+                            value: products.filter((p) => p.stock >= 10).length,
+                            total: products.length,
+                            color: "bg-green-500",
+                          },
+                          {
+                            name: "Stock Bajo",
+                            value: products.filter((p) => p.stock > 0 && p.stock < 10).length,
+                            total: products.length,
+                            color: "bg-yellow-500",
+                          },
+                          {
+                            name: "Agotado",
+                            value: products.filter((p) => p.stock === 0).length,
+                            total: products.length,
+                            color: "bg-red-500",
+                          },
                         ].map((cat) => (
                           <div key={cat.name} className="space-y-1">
                             <div className="flex justify-between text-sm">
                               <span className="text-foreground">{cat.name}</span>
-                              <span className="text-muted-foreground">{cat.value}%</span>
+                              <span className="text-muted-foreground">
+                                {cat.value} producto{cat.value !== 1 ? "s" : ""}
+                              </span>
                             </div>
                             <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 className={`h-full ${cat.color} rounded-full`}
-                                style={{ width: `${cat.value}%` }}
+                                style={{
+                                  width: `${cat.total > 0 ? (cat.value / cat.total) * 100 : 0}%`,
+                                }}
                               />
                             </div>
                           </div>
@@ -534,7 +619,7 @@ export default function AdminDashboard() {
 
                   {/* Top Products */}
                   <div className="bg-card rounded-lg border border-border p-5">
-                    <h3 className="font-medium text-foreground mb-4">Productos Mas Vendidos</h3>
+                    <h3 className="font-medium text-foreground mb-4">Productos Destacados</h3>
                     <div className="space-y-3">
                       {products.slice(0, 5).map((product, index) => (
                         <div key={product.id} className="flex items-center gap-4">
@@ -543,19 +628,24 @@ export default function AdminDashboard() {
                           </span>
                           <div className="relative w-10 h-10 rounded overflow-hidden flex-shrink-0">
                             <Image
-                              src={product.image || "/placeholder.svg"}
-                              alt={product.name}
+                              src={product.imagen_url || "/placeholder.svg"}
+                              alt={product.nombre}
                               fill
                               className="object-cover"
                             />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{product.name}</p>
-                            <p className="text-xs text-muted-foreground">{product.category}</p>
+                            <p className="text-sm font-medium text-foreground truncate">{product.nombre}</p>
+                            <p className="text-xs text-muted-foreground">{product.sku}</p>
                           </div>
-                          <p className="text-sm font-medium text-foreground">${product.price.toFixed(2)}</p>
+                          <p className="text-sm font-medium text-foreground">${product.precio.toFixed(2)}</p>
                         </div>
                       ))}
+                      {products.length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          No hay productos registrados.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

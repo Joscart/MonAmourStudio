@@ -1,45 +1,120 @@
-import os
-import time
-from typing import Optional
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.responses import Response
 
-app = FastAPI(title="Inventario Service", version="0.1.0")
+from app.config import settings
+from app.controllers.health import router as health_router
+from app.controllers.inventario import router as inventario_router
+from app.database import engine
+from app.events.consumer import KafkaEventConsumer, handle_order_created
+from app.events.producer import KafkaEventProducer
+from app.models import Base
+
+logger = logging.getLogger(__name__)
+
+# ── OpenTelemetry setup ──────────────────────────────────────────────────────
+
+resource = Resource.create({"service.name": settings.SERVICE_NAME})
+tracer_provider = TracerProvider(resource=resource)
+otlp_exporter = OTLPSpanExporter(endpoint=settings.OTLP_ENDPOINT, insecure=True)
+tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+trace.set_tracer_provider(tracer_provider)
+
+# ── Module-level Kafka producer reference ─────────────────────────────────────
+import app.events.producer as _producer_mod  # noqa: E402
 
 
-class Product(BaseModel):
-    id: str
-    name: str
-    price: float
-    description: Optional[str] = None
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 
-async def get_settings():
-    return {
-        "seed": os.getenv("SEED", "false"),
-        "database_url": os.getenv("DATABASE_URL", ""),
-        "minio_endpoint": os.getenv("MINIO_ENDPOINT", ""),
-    }
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── startup ───────────────────────────────────────────────────────
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ready")
+
+    # Kafka producer
+    kafka = KafkaEventProducer()
+    await kafka.start()
+    _producer_mod.kafka_producer = kafka
+
+    # Kafka consumer (order.created)
+    consumer = KafkaEventConsumer(group_id="inventario-group")
+    await consumer.start(topics=["order.created"])
+    consumer_task = asyncio.create_task(consumer.consume(handle_order_created))
+
+    yield
+
+    # ── shutdown ──────────────────────────────────────────────────────
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        pass
+    await consumer.stop()
+
+    await kafka.stop()
+    _producer_mod.kafka_producer = None
+
+    await engine.dispose()
+    tracer_provider.shutdown()
 
 
-@app.get("/healthz")
-async def healthcheck():
-    return {"status": "ok", "service": "inventario", "ts": int(time.time())}
+# ── FastAPI application ───────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="Inventario API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Instrument FastAPI with OpenTelemetry
+FastAPIInstrumentor.instrument_app(app)
 
 
-@app.get("/metrics")
+# ── Trace-ID middleware ───────────────────────────────────────────────────────
+
+
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    response = await call_next(request)
+    span = trace.get_current_span()
+    if span and span.get_span_context().trace_id:
+        trace_id = format(span.get_span_context().trace_id, "032x")
+        response.headers["X-Trace-Id"] = trace_id
+    return response
+
+
+# ── Prometheus metrics endpoint ───────────────────────────────────────────────
+
+
+@app.get("/metrics", include_in_schema=False)
 async def metrics():
-    return {"uptime_seconds": int(time.time()), "version": app.version}
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.get("/products", response_model=list[Product])
-async def list_products(settings: dict = Depends(get_settings)):
-    return []
+# ── Routers ───────────────────────────────────────────────────────────────────
 
-
-@app.get("/products/{product_id}", response_model=Product)
-async def get_product(product_id: str, settings: dict = Depends(get_settings)):
-    if not product_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return Product(id=product_id, name=f"product-{product_id}", price=0.0, description=None)
+app.include_router(health_router)
+app.include_router(inventario_router)

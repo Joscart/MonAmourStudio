@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import Image from "next/image"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
@@ -22,162 +22,74 @@ import {
   RefreshCw,
   ShoppingBag,
   AlertCircle,
+  Loader2,
 } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
+import { ordersApi, deliveriesApi } from "@/lib/api"
+import type { PedidoResponse, EntregaResponse } from "@/lib/types"
 
-type OrderStatus = "pendiente" | "procesando" | "enviado" | "entregado" | "cancelado"
-
-interface OrderItem {
-  id: string
-  name: string
-  image: string
-  quantity: number
-  price: number
-  size: string
-}
-
-interface Order {
-  id: string
-  date: string
-  status: OrderStatus
-  total: number
-  items: OrderItem[]
-  shippingAddress: {
-    name: string
-    street: string
-    city: string
-    phone: string
-  }
-  paymentMethod: string
-  trackingNumber?: string
-  estimatedDelivery?: string
-  timeline: {
-    status: string
-    date: string
-    completed: boolean
-  }[]
-}
-
-const orders: Order[] = [
-  {
-    id: "ORD-2026-001",
-    date: "15 Enero 2026",
-    status: "enviado",
-    total: 234.00,
-    items: [
-      { id: "1", name: "Marco Romance Dorado", image: "/images/frame-1.jpg", quantity: 1, price: 109.00, size: "Mediano" },
-      { id: "2", name: "Marco Flotante Oro Rosa", image: "/images/frame-2.jpg", quantity: 1, price: 125.00, size: "Grande" },
-    ],
-    shippingAddress: {
-      name: "Maria Garcia",
-      street: "Av. Amazonas N32-45",
-      city: "Quito Norte",
-      phone: "+593 99 123 4567",
-    },
-    paymentMethod: "Visa **** 4242",
-    trackingNumber: "EC123456789QU",
-    estimatedDelivery: "18-20 Enero 2026",
-    timeline: [
-      { status: "Pedido Recibido", date: "15 Ene, 10:30", completed: true },
-      { status: "Pago Confirmado", date: "15 Ene, 10:32", completed: true },
-      { status: "En Preparacion", date: "15 Ene, 14:00", completed: true },
-      { status: "Enviado", date: "16 Ene, 09:15", completed: true },
-      { status: "En Camino", date: "16 Ene, 11:00", completed: false },
-      { status: "Entregado", date: "Pendiente", completed: false },
-    ],
-  },
-  {
-    id: "ORD-2026-002",
-    date: "12 Enero 2026",
-    status: "procesando",
-    total: 145.00,
-    items: [
-      { id: "3", name: "Marco Barroco Vintage", image: "/images/frame-3.jpg", quantity: 1, price: 145.00, size: "Grande" },
-    ],
-    shippingAddress: {
-      name: "Maria Garcia",
-      street: "Av. Amazonas N32-45",
-      city: "Quito Norte",
-      phone: "+593 99 123 4567",
-    },
-    paymentMethod: "Visa **** 4242",
-    estimatedDelivery: "17-19 Enero 2026",
-    timeline: [
-      { status: "Pedido Recibido", date: "12 Ene, 16:45", completed: true },
-      { status: "Pago Confirmado", date: "12 Ene, 16:47", completed: true },
-      { status: "En Preparacion", date: "13 Ene, 09:00", completed: false },
-      { status: "Enviado", date: "Pendiente", completed: false },
-      { status: "Entregado", date: "Pendiente", completed: false },
-    ],
-  },
-  {
-    id: "ORD-2025-089",
-    date: "28 Diciembre 2025",
-    status: "entregado",
-    total: 89.00,
-    items: [
-      { id: "4", name: "Marco Acrilico Moderno", image: "/images/frame-4.jpg", quantity: 1, price: 89.00, size: "Pequeno" },
-    ],
-    shippingAddress: {
-      name: "Maria Garcia",
-      street: "Av. 6 de Diciembre N28-10",
-      city: "Quito Centro",
-      phone: "+593 99 123 4567",
-    },
-    paymentMethod: "Mastercard **** 5678",
-    trackingNumber: "EC987654321QU",
-    timeline: [
-      { status: "Pedido Recibido", date: "28 Dic, 11:20", completed: true },
-      { status: "Pago Confirmado", date: "28 Dic, 11:22", completed: true },
-      { status: "En Preparacion", date: "28 Dic, 15:00", completed: true },
-      { status: "Enviado", date: "29 Dic, 08:30", completed: true },
-      { status: "Entregado", date: "31 Dic, 14:45", completed: true },
-    ],
-  },
-  {
-    id: "ORD-2025-075",
-    date: "15 Diciembre 2025",
-    status: "cancelado",
-    total: 320.00,
-    items: [
-      { id: "5", name: "Marco Plata Grabado", image: "/images/frame-5.jpg", quantity: 2, price: 160.00, size: "Grande" },
-    ],
-    shippingAddress: {
-      name: "Maria Garcia",
-      street: "Av. Amazonas N32-45",
-      city: "Quito Norte",
-      phone: "+593 99 123 4567",
-    },
-    paymentMethod: "Visa **** 4242",
-    timeline: [
-      { status: "Pedido Recibido", date: "15 Dic, 09:00", completed: true },
-      { status: "Cancelado por el usuario", date: "15 Dic, 10:30", completed: true },
-    ],
-  },
-]
-
-const statusConfig: Record<OrderStatus, { label: string; color: string; bgColor: string; icon: typeof Package }> = {
+const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: typeof Package }> = {
   pendiente: { label: "Pendiente", color: "text-orange-700", bgColor: "bg-orange-100", icon: Clock },
+  confirmado: { label: "Confirmado", color: "text-cyan-700", bgColor: "bg-cyan-100", icon: CheckCircle },
   procesando: { label: "En Proceso", color: "text-yellow-700", bgColor: "bg-yellow-100", icon: Package },
   enviado: { label: "Enviado", color: "text-blue-700", bgColor: "bg-blue-100", icon: Truck },
   entregado: { label: "Entregado", color: "text-green-700", bgColor: "bg-green-100", icon: CheckCircle },
   cancelado: { label: "Cancelado", color: "text-red-700", bgColor: "bg-red-100", icon: X },
 }
 
+const defaultStatus = { label: "Desconocido", color: "text-gray-700", bgColor: "bg-gray-100", icon: Clock }
+
 export default function OrdersPage() {
+  const router = useRouter()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
+  const [orders, setOrders] = useState<PedidoResponse[]>([])
+  const [deliveries, setDeliveries] = useState<Record<string, EntregaResponse>>({})
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | "todos">("todos")
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(orders[0].id)
+  const [statusFilter, setStatusFilter] = useState<string>("todos")
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login")
+    }
+  }, [authLoading, isAuthenticated, router])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    setIsLoading(true)
+    ordersApi
+      .list()
+      .then(async (data) => {
+        setOrders(data)
+        if (data.length > 0) setExpandedOrder(data[0].id)
+        // Fetch deliveries for shipped/delivered orders
+        const deliveryMap: Record<string, EntregaResponse> = {}
+        for (const order of data) {
+          if (["enviado", "entregado"].includes(order.estado)) {
+            try {
+              const d = await deliveriesApi.getByOrder(order.id)
+              deliveryMap[order.id] = d
+            } catch { /* delivery may not exist yet */ }
+          }
+        }
+        setDeliveries(deliveryMap)
+      })
+      .catch((err) => setError(err.message ?? "Error al cargar pedidos"))
+      .finally(() => setIsLoading(false))
+  }, [isAuthenticated])
 
   const filteredOrders = orders.filter((order) => {
-    const matchesSearch = order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.items.some(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    const matchesStatus = statusFilter === "todos" || order.status === statusFilter
+    const matchesSearch = order.id.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesStatus = statusFilter === "todos" || order.estado === statusFilter
     return matchesSearch && matchesStatus
   })
 
-  const getStatusProgress = (status: OrderStatus) => {
+  const getStatusProgress = (status: string) => {
     switch (status) {
       case "pendiente": return 10
+      case "confirmado": return 25
       case "procesando": return 40
       case "enviado": return 70
       case "entregado": return 100
@@ -190,6 +102,17 @@ export default function OrdersPage() {
     <main className="min-h-screen bg-background">
       <Header />
 
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-3 text-muted-foreground">Cargando pedidos...</span>
+        </div>
+      ) : error ? (
+        <div className="text-center py-16">
+          <p className="text-destructive mb-4">{error}</p>
+          <Button variant="outline" onClick={() => window.location.reload()} className="bg-transparent">Reintentar</Button>
+        </div>
+      ) : (
       <section className="pt-24 pb-16">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Page Header */}
@@ -214,7 +137,7 @@ export default function OrdersPage() {
               />
             </div>
             <div className="flex gap-2 flex-wrap">
-              {(["todos", "procesando", "enviado", "entregado"] as const).map((status) => (
+              {["todos", "pendiente", "confirmado", "procesando", "enviado", "entregado", "cancelado"].map((status) => (
                 <button
                   key={status}
                   type="button"
@@ -225,7 +148,7 @@ export default function OrdersPage() {
                       : "bg-secondary text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {status === "todos" ? "Todos" : statusConfig[status].label}
+                  {status === "todos" ? "Todos" : (statusConfig[status]?.label ?? status)}
                 </button>
               ))}
             </div>
@@ -235,7 +158,7 @@ export default function OrdersPage() {
           {filteredOrders.length > 0 ? (
             <div className="space-y-4">
               {filteredOrders.map((order) => {
-                const status = statusConfig[order.status]
+                const status = statusConfig[order.estado] ?? defaultStatus
                 const isExpanded = expandedOrder === order.id
                 const StatusIcon = status.icon
 
@@ -262,7 +185,7 @@ export default function OrdersPage() {
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mt-1">
-                            {order.date} - {order.items.length} {order.items.length === 1 ? "producto" : "productos"}
+                            {new Date(order.fecha_creacion).toLocaleDateString("es-EC")} - {order.items.length} {order.items.length === 1 ? "producto" : "productos"}
                           </p>
                         </div>
                       </div>
@@ -276,20 +199,20 @@ export default function OrdersPage() {
                     {isExpanded && (
                       <div className="border-t border-border">
                         {/* Progress Bar (for active orders) */}
-                        {order.status !== "cancelado" && order.status !== "entregado" && (
+                        {order.estado !== "cancelado" && order.estado !== "entregado" && (
                           <div className="p-4 sm:p-6 bg-secondary/30">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-sm font-medium text-foreground">Progreso del Pedido</span>
-                              {order.estimatedDelivery && (
+                              {deliveries[order.id]?.fecha_programada && (
                                 <span className="text-sm text-muted-foreground">
-                                  Entrega estimada: {order.estimatedDelivery}
+                                  Entrega estimada: {new Date(deliveries[order.id].fecha_programada!).toLocaleDateString("es-EC")}
                                 </span>
                               )}
                             </div>
                             <div className="h-2 bg-secondary rounded-full overflow-hidden">
                               <div 
                                 className="h-full bg-primary rounded-full transition-all duration-500"
-                                style={{ width: `${getStatusProgress(order.status)}%` }}
+                                style={{ width: `${getStatusProgress(order.estado)}%` }}
                               />
                             </div>
                             <div className="flex justify-between mt-2 text-xs text-muted-foreground">
@@ -308,21 +231,13 @@ export default function OrdersPage() {
                             <div className="space-y-3">
                               {order.items.map((item) => (
                                 <div key={item.id} className="flex gap-3">
-                                  <div className="relative w-16 h-16 rounded overflow-hidden flex-shrink-0">
-                                    <Image
-                                      src={item.image || "/placeholder.svg"}
-                                      alt={item.name}
-                                      fill
-                                      className="object-cover"
-                                    />
-                                  </div>
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
+                                    <p className="text-sm font-medium text-foreground">Producto</p>
                                     <p className="text-xs text-muted-foreground">
-                                      Tamano: {item.size} | Cantidad: {item.quantity}
+                                      Cantidad: {item.cantidad} | ${item.precio_unitario.toFixed(2)} c/u
                                     </p>
                                     <p className="text-sm font-medium text-foreground mt-1">
-                                      ${item.price.toFixed(2)}
+                                      ${(item.cantidad * item.precio_unitario).toFixed(2)}
                                     </p>
                                   </div>
                                 </div>
@@ -339,70 +254,65 @@ export default function OrdersPage() {
                                 Direccion de Envio
                               </h4>
                               <div className="text-sm text-muted-foreground bg-secondary/50 rounded-lg p-3">
-                                <p className="text-foreground font-medium">{order.shippingAddress.name}</p>
-                                <p>{order.shippingAddress.street}</p>
-                                <p>{order.shippingAddress.city}</p>
-                                <p>{order.shippingAddress.phone}</p>
+                                <p>{order.direccion_entrega}</p>
                               </div>
                             </div>
 
-                            {/* Payment Method */}
+                            {/* Order Totals */}
                             <div>
                               <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                                 <CreditCard className="h-4 w-4 text-primary" />
-                                Metodo de Pago
+                                Resumen
                               </h4>
-                              <p className="text-sm text-muted-foreground">{order.paymentMethod}</p>
+                              <div className="text-sm text-muted-foreground space-y-1">
+                                <p>Subtotal: ${order.subtotal.toFixed(2)}</p>
+                                <p>Envio: ${order.shipping.toFixed(2)}</p>
+                                <p className="text-foreground font-medium">Total: ${order.total.toFixed(2)}</p>
+                              </div>
                             </div>
 
                             {/* Tracking Number */}
-                            {order.trackingNumber && (
+                            {deliveries[order.id]?.guia && (
                               <div>
                                 <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                                   <Truck className="h-4 w-4 text-primary" />
                                   Numero de Rastreo
                                 </h4>
                                 <p className="text-sm font-mono bg-secondary/50 rounded px-3 py-2 inline-block">
-                                  {order.trackingNumber}
+                                  {deliveries[order.id].guia}
                                 </p>
                               </div>
                             )}
                           </div>
                         </div>
 
-                        {/* Timeline */}
-                        <div className="p-4 sm:p-6 border-t border-border">
-                          <h4 className="font-medium text-foreground mb-4 flex items-center gap-2">
-                            <Calendar className="h-4 w-4 text-primary" />
-                            Historial del Pedido
-                          </h4>
-                          <div className="relative">
-                            {order.timeline.map((event, index) => (
-                              <div key={index} className="flex gap-4 pb-4 last:pb-0">
-                                <div className="flex flex-col items-center">
-                                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
-                                    event.completed ? "bg-primary" : "bg-border"
-                                  }`} />
-                                  {index < order.timeline.length - 1 && (
-                                    <div className={`w-0.5 flex-1 mt-1 ${
-                                      event.completed ? "bg-primary" : "bg-border"
-                                    }`} />
-                                  )}
-                                </div>
-                                <div className="flex-1 pb-4">
-                                  <p className={`text-sm font-medium ${event.completed ? "text-foreground" : "text-muted-foreground"}`}>
-                                    {event.status}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">{event.date}</p>
-                                </div>
-                              </div>
-                            ))}
+                        {/* Delivery Info */}
+                        {deliveries[order.id] && (
+                          <div className="p-4 sm:p-6 border-t border-border">
+                            <h4 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                              <Truck className="h-4 w-4 text-primary" />
+                              Informacion de Entrega
+                            </h4>
+                            <div className="text-sm space-y-2">
+                              <p><span className="text-muted-foreground">Guia:</span> <span className="font-mono">{deliveries[order.id].guia}</span></p>
+                              <p><span className="text-muted-foreground">Estado:</span> {deliveries[order.id].estado}</p>
+                              <p><span className="text-muted-foreground">Direccion:</span> {deliveries[order.id].direccion}</p>
+                              {deliveries[order.id].fecha_programada && (
+                                <p><span className="text-muted-foreground">Fecha programada:</span> {new Date(deliveries[order.id].fecha_programada!).toLocaleDateString("es-EC")}</p>
+                              )}
+                              {deliveries[order.id].fecha_entrega && (
+                                <p><span className="text-muted-foreground">Entregado:</span> {new Date(deliveries[order.id].fecha_entrega!).toLocaleDateString("es-EC")}</p>
+                              )}
+                              {deliveries[order.id].notas && (
+                                <p><span className="text-muted-foreground">Notas:</span> {deliveries[order.id].notas}</p>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         {/* Actions */}
                         <div className="p-4 sm:p-6 border-t border-border bg-secondary/30 flex flex-wrap gap-3">
-                          {order.status === "entregado" && (
+                          {order.estado === "entregado" && (
                             <>
                               <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground">
                                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -413,7 +323,7 @@ export default function OrdersPage() {
                               </Button>
                             </>
                           )}
-                          {(order.status === "enviado" || order.status === "procesando") && (
+                          {(order.estado === "enviado" || order.estado === "procesando") && (
                             <>
                               <Button size="sm" variant="outline" className="bg-transparent">
                                 <Truck className="h-4 w-4 mr-2" />
@@ -424,23 +334,25 @@ export default function OrdersPage() {
                               </Button>
                             </>
                           )}
-                          {order.status === "cancelado" && (
+                          {order.estado === "cancelado" && (
                             <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground">
                               <ShoppingBag className="h-4 w-4 mr-2" />
                               Realizar Nuevo Pedido
                             </Button>
                           )}
+                          {order.items.length > 0 && (
                           <Button 
                             size="sm" 
                             variant="outline" 
                             className="bg-transparent ml-auto"
                             asChild
                           >
-                            <Link href={`/product/${order.items[0].id}`}>
+                            <Link href={`/product/${order.items[0].producto_id}`}>
                               Ver Producto
                               <ChevronRight className="h-4 w-4 ml-1" />
                             </Link>
                           </Button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -500,6 +412,7 @@ export default function OrdersPage() {
           </div>
         </div>
       </section>
+      )}
 
       <Footer />
     </main>

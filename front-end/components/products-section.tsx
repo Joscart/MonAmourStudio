@@ -1,58 +1,26 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import { ProductCard } from "@/components/product-card"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-
-const products = [
-  {
-    id: "1",
-    name: "Marco Romance Dorado",
-    price: 89.00,
-    image: "/images/frame-1.jpg",
-    category: "Marcos Premium",
-    isBestseller: true,
-  },
-  {
-    id: "2",
-    name: "Marco Flotante Oro Rosa",
-    price: 125.00,
-    image: "/images/frame-2.jpg",
-    category: "Coleccion Bodas",
-    isNew: true,
-  },
-  {
-    id: "3",
-    name: "Marco Barroco Vintage",
-    price: 145.00,
-    image: "/images/frame-3.jpg",
-    category: "Coleccion Clasica",
-  },
-  {
-    id: "4",
-    name: "Marco Acrilico Moderno",
-    price: 75.00,
-    image: "/images/frame-4.jpg",
-    category: "Contemporaneo",
-    isNew: true,
-  },
-  {
-    id: "5",
-    name: "Marco Plata Grabado",
-    price: 165.00,
-    image: "/images/frame-5.jpg",
-    category: "Regalos Aniversario",
-    isBestseller: true,
-  },
-  {
-    id: "6",
-    name: "Marco Vidrio Doble Cara",
-    price: 110.00,
-    image: "/images/frame-6.jpg",
-    category: "Marcos Premium",
-  },
-]
+import { inventoryApi } from "@/lib/api"
+import { useCart } from "@/contexts/cart-context"
+import type { ProductoResponse } from "@/lib/types"
 
 export function ProductsSection() {
+  const [products, setProducts] = useState<ProductoResponse[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const { addItem } = useCart()
+
+  useEffect(() => {
+    inventoryApi
+      .list({ limit: 6 })
+      .then(setProducts)
+      .catch(() => {})
+      .finally(() => setIsLoading(false))
+  }, [])
   return (
     <section id="tienda" className="py-20 lg:py-28 bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -69,11 +37,36 @@ export function ProductsSection() {
         </div>
 
         {/* Products Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 mb-12">
-          {products.map((product) => (
-            <ProductCard key={product.id} {...product} />
-          ))}
-        </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : products.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 mb-12">
+            {products.map((product) => (
+              <ProductCard
+                key={product.id}
+                id={product.id}
+                name={product.nombre}
+                price={product.precio}
+                image={product.imagen_url || "/placeholder.svg"}
+                onAddToCart={() =>
+                  addItem({
+                    id: product.id,
+                    nombre: product.nombre,
+                    precio: product.precio,
+                    imagen_url: product.imagen_url,
+                    sku: product.sku,
+                  })
+                }
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 mb-12">
+            <p className="text-muted-foreground">Cargando productos...</p>
+          </div>
+        )}
 
         {/* View All Button */}
         <div className="text-center">

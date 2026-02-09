@@ -3,10 +3,14 @@
 import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { Menu, X, ShoppingBag, Search, Heart, User } from "lucide-react"
+import { Menu, X, ShoppingBag, Search, Heart, User, LogOut } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
+import { useCart } from "@/contexts/cart-context"
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const { isAuthenticated, user, logout } = useAuth()
+  const { totalItems } = useCart()
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -55,14 +59,22 @@ export function Header() {
             <button type="button" className="hidden sm:block p-2 text-foreground hover:text-primary transition-colors" aria-label="Favoritos">
               <Heart className="h-5 w-5" />
             </button>
-            <Link href="/account" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Mi cuenta">
-              <User className="h-5 w-5" />
-            </Link>
+            {isAuthenticated ? (
+              <Link href="/account" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Mi cuenta" title={user?.nombre}>
+                <User className="h-5 w-5" />
+              </Link>
+            ) : (
+              <Link href="/login" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Iniciar sesion">
+                <User className="h-5 w-5" />
+              </Link>
+            )}
             <Link href="/cart" className="p-2 text-foreground hover:text-primary transition-colors relative" aria-label="Carrito">
               <ShoppingBag className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 bg-accent text-accent-foreground text-xs w-5 h-5 rounded-full flex items-center justify-center">
-                0
-              </span>
+              {totalItems > 0 && (
+                <span className="absolute -top-1 -right-1 bg-accent text-accent-foreground text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                  {totalItems}
+                </span>
+              )}
             </Link>
           </div>
         </div>
@@ -84,9 +96,25 @@ export function Header() {
             <Link href="#contacto" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
               CONTACTO
             </Link>
-            <Link href="/account" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
-              MI CUENTA
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link href="/account" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
+                  MI CUENTA ({user?.nombre})
+                </Link>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="text-sm tracking-wide text-destructive hover:text-destructive/80 transition-colors py-2 text-left flex items-center gap-2"
+                >
+                  <LogOut className="h-4 w-4" />
+                  CERRAR SESION
+                </button>
+              </>
+            ) : (
+              <Link href="/login" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
+                INICIAR SESION
+              </Link>
+            )}
           </nav>
         </div>
       )}

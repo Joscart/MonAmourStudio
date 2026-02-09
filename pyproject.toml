@@ -1,0 +1,37 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "S",   # flake8-bandit
+    "T20", # flake8-print
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "S101",  # assert allowed in tests
+    "S105",  # hardcoded password allowed in config defaults
+    "S106",  # hardcoded password allowed in config defaults
+    "B008",  # function calls in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S106", "T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "back-end/*/tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]

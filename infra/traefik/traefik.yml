@@ -1,0 +1,23 @@
+# ──────────────────────────────────────────────────────────────
+#  Traefik – Static Configuration
+#  Mon Amour Studio – Reverse Proxy + Dashboard
+# ──────────────────────────────────────────────────────────────
+
+api:
+  dashboard: true
+  insecure: true            # Dashboard en :8080 sin auth (dev)
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false  # Solo servicios con label traefik.enable=true
+    network: ecommerce_net
+
+log:
+  level: INFO
+
+accessLog: {}

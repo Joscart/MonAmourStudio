@@ -2,25 +2,37 @@
 
 import React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Eye, EyeOff, ArrowLeft, Check } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
+import { ApiError } from "@/lib/api"
 
 export default function RegisterPage() {
+  const router = useRouter()
+  const { register, isAuthenticated, isLoading: authLoading } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [acceptTerms, setAcceptTerms] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     password: "",
   })
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push("/account")
+    }
+  }, [authLoading, isAuthenticated, router])
 
   const passwordRequirements = [
     { label: "Minimo 8 caracteres", met: formData.password.length >= 8 },
@@ -32,11 +44,23 @@ export default function RegisterPage() {
     e.preventDefault()
     if (!acceptTerms) return
     setIsLoading(true)
-    // Simular registro
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsLoading(false)
-    // Redirigir al login
-    window.location.href = "/login"
+    setError(null)
+    try {
+      await register(
+        formData.firstName + " " + formData.lastName,
+        formData.email,
+        formData.password,
+      )
+      router.push("/account")
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message)
+      } else {
+        setError("Ocurrio un error inesperado. Intenta de nuevo.")
+      }
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -91,6 +115,13 @@ export default function RegisterPage() {
               Completa tus datos para registrarte y comenzar a comprar
             </p>
           </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="mb-6 rounded-md border border-red-500/50 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
 
           {/* Register Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
