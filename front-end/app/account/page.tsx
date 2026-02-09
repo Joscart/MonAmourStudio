@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useRef, useMemo, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import { Header } from "@/components/header"
@@ -29,7 +29,69 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Camera,
+  Upload,
+  ChevronDown,
+  Search,
+  AlertTriangle,
 } from "lucide-react"
+
+/* ── Country codes for phone input ──────────────────────────── */
+const COUNTRIES = [
+  { code: "+593", name: "Ecuador", flag: "🇪🇨" },
+  { code: "+57", name: "Colombia", flag: "🇨🇴" },
+  { code: "+51", name: "Peru", flag: "🇵🇪" },
+  { code: "+56", name: "Chile", flag: "🇨🇱" },
+  { code: "+54", name: "Argentina", flag: "🇦🇷" },
+  { code: "+55", name: "Brasil", flag: "🇧🇷" },
+  { code: "+58", name: "Venezuela", flag: "🇻🇪" },
+  { code: "+52", name: "Mexico", flag: "🇲🇽" },
+  { code: "+591", name: "Bolivia", flag: "🇧🇴" },
+  { code: "+595", name: "Paraguay", flag: "🇵🇾" },
+  { code: "+598", name: "Uruguay", flag: "🇺🇾" },
+  { code: "+507", name: "Panama", flag: "🇵🇦" },
+  { code: "+506", name: "Costa Rica", flag: "🇨🇷" },
+  { code: "+503", name: "El Salvador", flag: "🇸🇻" },
+  { code: "+502", name: "Guatemala", flag: "🇬🇹" },
+  { code: "+504", name: "Honduras", flag: "🇭🇳" },
+  { code: "+505", name: "Nicaragua", flag: "🇳🇮" },
+  { code: "+1", name: "Estados Unidos", flag: "🇺🇸" },
+  { code: "+34", name: "Espana", flag: "🇪🇸" },
+  { code: "+44", name: "Reino Unido", flag: "🇬🇧" },
+  { code: "+33", name: "Francia", flag: "🇫🇷" },
+  { code: "+49", name: "Alemania", flag: "🇩🇪" },
+  { code: "+39", name: "Italia", flag: "🇮🇹" },
+]
+
+/* ── Card number helpers ────────────────────────────────────── */
+function luhnCheck(num: string): boolean {
+  const digits = num.replace(/\D/g, "")
+  let sum = 0
+  let isEven = false
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = parseInt(digits[i], 10)
+    if (isEven) { d *= 2; if (d > 9) d -= 9 }
+    sum += d
+    isEven = !isEven
+  }
+  return sum % 10 === 0
+}
+
+function detectCardType(num: string): string {
+  const n = num.replace(/\D/g, "")
+  if (/^4/.test(n)) return "Visa"
+  if (/^5[1-5]/.test(n) || /^2[2-7]/.test(n)) return "Mastercard"
+  if (/^3[47]/.test(n)) return "Amex"
+  if (/^3(0[0-5]|[68])/.test(n)) return "Diners"
+  if (/^6(?:011|5)/.test(n)) return "Discover"
+  return "Otro"
+}
+
+function formatCardNumber(num: string): string {
+  const n = num.replace(/\D/g, "")
+  const groups = n.match(/.{1,4}/g)
+  return groups ? groups.join(" ") : n
+}
 
 const menuItems = [
   { id: "perfil", label: "Mi Perfil", icon: User },
@@ -40,8 +102,9 @@ const menuItems = [
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
 
-export default function AccountPage() {
+function AccountPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, isAuthenticated, isLoading: authLoading, logout, refreshUser } = useAuth()
   const [activeSection, setActiveSection] = useState("perfil")
 
@@ -50,8 +113,17 @@ export default function AccountPage() {
   const [nombre, setNombre] = useState("")
   const [email, setEmail] = useState("")
   const [telefono, setTelefono] = useState("")
+  const [phoneCountry, setPhoneCountry] = useState(COUNTRIES[0]) // Ecuador default
+  const [phoneNumber, setPhoneNumber] = useState("")
+  const [phoneDropdownOpen, setPhoneDropdownOpen] = useState(false)
+  const [phoneSearch, setPhoneSearch] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Profile photo
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   // Orders
   const [orders, setOrders] = useState<PedidoResponse[]>([])
@@ -73,6 +145,8 @@ export default function AccountPage() {
   const [metLoading, setMetLoading] = useState(false)
   const [showMetForm, setShowMetForm] = useState(false)
   const [metForm, setMetForm] = useState({ tipo: "Visa", ultimos_4: "", titular: "", expiracion: "", es_principal: false })
+  const [cardNumber, setCardNumber] = useState("")
+  const [cardError, setCardError] = useState<string | null>(null)
 
   // Password change
   const [showPwChange, setShowPwChange] = useState(false)
@@ -90,6 +164,14 @@ export default function AccountPage() {
   // General error
   const [sectionError, setSectionError] = useState<string | null>(null)
 
+  // Handle tab from URL params (e.g. /account?tab=favoritos)
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab && menuItems.some((m) => m.id === tab)) {
+      setActiveSection(tab)
+    }
+  }, [searchParams])
+
   // Redirect if not authenticated
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -103,6 +185,16 @@ export default function AccountPage() {
       setNombre(user.nombre)
       setEmail(user.email)
       setTelefono(user.telefono ?? "")
+      // Parse phone into country code + number
+      if (user.telefono) {
+        const matched = COUNTRIES.find((c) => user.telefono!.startsWith(c.code))
+        if (matched) {
+          setPhoneCountry(matched)
+          setPhoneNumber(user.telefono.slice(matched.code.length).trim())
+        } else {
+          setPhoneNumber(user.telefono)
+        }
+      }
     }
   }, [user])
 
@@ -140,7 +232,8 @@ export default function AccountPage() {
     setIsSaving(true)
     setSaveError(null)
     try {
-      await usersApi.updateMe({ nombre, email, telefono: telefono || undefined })
+      const fullPhone = phoneNumber.trim() ? `${phoneCountry.code} ${phoneNumber.trim()}` : undefined
+      await usersApi.updateMe({ nombre, email, telefono: fullPhone })
       await refreshUser()
       setIsEditing(false)
     } catch (err) {
@@ -149,6 +242,74 @@ export default function AccountPage() {
       setIsSaving(false)
     }
   }
+
+  const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoUploading(true)
+    setPhotoError(null)
+    try {
+      await usersApi.uploadFoto(file)
+      await refreshUser()
+    } catch (err) {
+      setPhotoError(err instanceof ApiError ? err.message : "Error al subir foto")
+    } finally {
+      setPhotoUploading(false)
+      if (photoInputRef.current) photoInputRef.current.value = ""
+    }
+  }
+
+  const handleDeletePhoto = async () => {
+    setPhotoUploading(true)
+    setPhotoError(null)
+    try {
+      await usersApi.deleteFoto()
+      await refreshUser()
+    } catch (err) {
+      setPhotoError(err instanceof ApiError ? err.message : "Error al eliminar foto")
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  const handleCardNumberChange = (value: string) => {
+    const digits = value.replace(/\D/g, "").slice(0, 19)
+    setCardNumber(digits)
+    setCardError(null)
+
+    // Auto-detect card type
+    if (digits.length >= 2) {
+      const detected = detectCardType(digits)
+      setMetForm((f) => ({ ...f, tipo: detected }))
+    }
+
+    // Auto-fill last 4 digits
+    if (digits.length >= 4) {
+      setMetForm((f) => ({ ...f, ultimos_4: digits.slice(-4) }))
+    }
+  }
+
+  const validateCard = (): boolean => {
+    const digits = cardNumber.replace(/\D/g, "")
+    if (digits.length < 13 || digits.length > 19) {
+      setCardError("El numero de tarjeta debe tener entre 13 y 19 digitos")
+      return false
+    }
+    if (!luhnCheck(digits)) {
+      setCardError("Numero de tarjeta invalido")
+      return false
+    }
+    setCardError(null)
+    return true
+  }
+
+  const filteredCountries = useMemo(() => {
+    if (!phoneSearch.trim()) return COUNTRIES
+    const s = phoneSearch.toLowerCase()
+    return COUNTRIES.filter(
+      (c) => c.name.toLowerCase().includes(s) || c.code.includes(s),
+    )
+  }, [phoneSearch])
 
   const handleChangePassword = async () => {
     setPwError(null)
@@ -208,6 +369,7 @@ export default function AccountPage() {
   }
 
   const handleCreateMetodo = async () => {
+    if (!validateCard()) return
     try {
       const m = await usersApi.createMetodoPago({
         tipo: metForm.tipo,
@@ -219,6 +381,8 @@ export default function AccountPage() {
       setMetodos((prev) => metForm.es_principal ? [m, ...prev.map((x) => ({ ...x, es_principal: false }))] : [...prev, m])
       setShowMetForm(false)
       setMetForm({ tipo: "Visa", ultimos_4: "", titular: "", expiracion: "", es_principal: false })
+      setCardNumber("")
+      setCardError(null)
     } catch (err) {
       setSectionError(err instanceof ApiError ? err.message : "Error al crear método de pago")
     }
@@ -283,8 +447,12 @@ export default function AccountPage() {
             <aside className="lg:col-span-1">
               <div className="bg-card rounded-lg border border-border p-4 sticky top-24">
                 <div className="flex items-center gap-4 pb-4 border-b border-border mb-4">
-                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                    <User className="h-6 w-6 text-primary" />
+                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {user.foto_url ? (
+                      <Image src={user.foto_url} alt={user.nombre} width={56} height={56} className="w-full h-full object-cover" />
+                    ) : (
+                      <User className="h-6 w-6 text-primary" />
+                    )}
                   </div>
                   <div>
                     <p className="font-medium text-foreground">{user.nombre}</p>
@@ -322,6 +490,54 @@ export default function AccountPage() {
                         {isEditing ? "Cancelar" : "Editar"}
                       </Button>
                     </div>
+
+                    {/* Profile Photo */}
+                    <div className="flex items-center gap-4 mb-6 pb-6 border-b border-border">
+                      <div className="relative group">
+                        <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden border-2 border-border">
+                          {user.foto_url ? (
+                            <Image src={user.foto_url} alt={user.nombre} width={80} height={80} className="w-full h-full object-cover" />
+                          ) : (
+                            <User className="h-8 w-8 text-primary" />
+                          )}
+                        </div>
+                        {isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => photoInputRef.current?.click()}
+                            className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            disabled={photoUploading}
+                          >
+                            {photoUploading ? <Loader2 className="h-5 w-5 text-white animate-spin" /> : <Camera className="h-5 w-5 text-white" />}
+                          </button>
+                        )}
+                        <input
+                          ref={photoInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          className="hidden"
+                          onChange={handleUploadPhoto}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-foreground">{user.nombre}</p>
+                        <p className="text-sm text-muted-foreground">{user.email}</p>
+                        {isEditing && (
+                          <div className="flex gap-2 mt-2">
+                            <Button size="sm" variant="outline" className="bg-transparent text-xs h-7" onClick={() => photoInputRef.current?.click()} disabled={photoUploading}>
+                              <Upload className="h-3 w-3 mr-1" /> Cambiar foto
+                            </Button>
+                            {user.foto_url && (
+                              <Button size="sm" variant="outline" className="bg-transparent text-xs h-7 text-destructive hover:bg-destructive/10" onClick={handleDeletePhoto} disabled={photoUploading}>
+                                <Trash2 className="h-3 w-3 mr-1" /> Eliminar
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {photoError && <p className="text-xs text-destructive mt-1">{photoError}</p>}
+                      </div>
+                    </div>
+
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label htmlFor="nombre">Nombre</Label>
@@ -331,14 +547,71 @@ export default function AccountPage() {
                         <Label htmlFor="email">Correo Electronico</Label>
                         <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!isEditing} className="bg-background border-border" />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="telefono">Telefono</Label>
-                        <Input id="telefono" value={telefono} onChange={(e) => setTelefono(e.target.value)} disabled={!isEditing} placeholder="Ej: +593 99 123 4567" className="bg-background border-border" />
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>Telefono</Label>
+                        <div className="flex gap-2">
+                          {/* Country code selector */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => isEditing && setPhoneDropdownOpen(!phoneDropdownOpen)}
+                              disabled={!isEditing}
+                              className="flex items-center gap-1.5 h-10 px-3 rounded-md border border-border bg-background text-sm min-w-[120px] disabled:opacity-50"
+                            >
+                              <span>{phoneCountry.flag}</span>
+                              <span className="font-medium">{phoneCountry.code}</span>
+                              {isEditing && <ChevronDown className="h-3 w-3 ml-auto text-muted-foreground" />}
+                            </button>
+                            {phoneDropdownOpen && (
+                              <div className="absolute z-50 top-full mt-1 left-0 w-64 bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-hidden">
+                                <div className="p-2 border-b border-border">
+                                  <div className="relative">
+                                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                    <input
+                                      type="text"
+                                      value={phoneSearch}
+                                      onChange={(e) => setPhoneSearch(e.target.value)}
+                                      placeholder="Buscar pais..."
+                                      className="w-full pl-7 pr-3 py-1.5 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                                      autoFocus
+                                    />
+                                  </div>
+                                </div>
+                                <div className="overflow-y-auto max-h-44">
+                                  {filteredCountries.map((c) => (
+                                    <button
+                                      key={c.code + c.name}
+                                      type="button"
+                                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors ${phoneCountry.code === c.code ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                                      onClick={() => { setPhoneCountry(c); setPhoneDropdownOpen(false); setPhoneSearch("") }}
+                                    >
+                                      <span>{c.flag}</span>
+                                      <span className="flex-1 text-left truncate">{c.name}</span>
+                                      <span className="text-muted-foreground text-xs">{c.code}</span>
+                                    </button>
+                                  ))}
+                                  {filteredCountries.length === 0 && (
+                                    <p className="px-3 py-2 text-xs text-muted-foreground text-center">Sin resultados</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <Input
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d\s-]/g, ""))}
+                            disabled={!isEditing}
+                            placeholder="99 123 4567"
+                            className="bg-background border-border flex-1"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Rol</Label>
-                        <Input value={user.rol} disabled className="bg-background border-border capitalize" />
-                      </div>
+                      {user.rol === "admin" && (
+                        <div className="space-y-2">
+                          <Label>Rol</Label>
+                          <Input value={user.rol} disabled className="bg-background border-border capitalize" />
+                        </div>
+                      )}
                     </div>
                     {saveError && <p className="mt-4 text-sm text-destructive">{saveError}</p>}
                     {isEditing && (
@@ -539,17 +812,23 @@ export default function AccountPage() {
 
                   {showMetForm && (
                     <div className="bg-card rounded-lg border border-border p-4 mb-4 space-y-3">
-                      <div className="grid sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Tipo de Tarjeta</Label>
-                          <select value={metForm.tipo} onChange={(e) => setMetForm((f) => ({ ...f, tipo: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm h-9">
-                            <option>Visa</option><option>Mastercard</option><option>Amex</option><option>Diners</option>
-                          </select>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Numero de Tarjeta *</Label>
+                        <div className="relative">
+                          <Input
+                            value={formatCardNumber(cardNumber)}
+                            onChange={handleCardNumberChange}
+                            placeholder="4242 4242 4242 4242"
+                            maxLength={23}
+                            className={`bg-background border-border h-9 pr-20 font-mono ${cardError ? "border-destructive" : ""}`}
+                          />
+                          {metForm.tipo && (
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                              {metForm.tipo}
+                            </span>
+                          )}
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Ultimos 4 digitos *</Label>
-                          <Input maxLength={4} value={metForm.ultimos_4} onChange={(e) => setMetForm((f) => ({ ...f, ultimos_4: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="4242" className="bg-background border-border h-9" />
-                        </div>
+                        {cardError && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{cardError}</p>}
                       </div>
                       <div className="grid sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
@@ -563,8 +842,8 @@ export default function AccountPage() {
                       </div>
                       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={metForm.es_principal} onChange={(e) => setMetForm((f) => ({ ...f, es_principal: e.target.checked }))} /> Marcar como principal</label>
                       <div className="flex gap-2">
-                        <Button size="sm" className="bg-primary text-primary-foreground" disabled={metForm.ultimos_4.length !== 4 || !metForm.titular || !metForm.expiracion.match(/^\d{2}\/\d{4}$/)} onClick={handleCreateMetodo}>Guardar</Button>
-                        <Button size="sm" variant="outline" className="bg-transparent" onClick={() => setShowMetForm(false)}>Cancelar</Button>
+                        <Button size="sm" className="bg-primary text-primary-foreground" disabled={!cardNumber || !!cardError || !metForm.titular || !metForm.expiracion.match(/^\d{2}\/\d{4}$/)} onClick={handleCreateMetodo}>Guardar</Button>
+                        <Button size="sm" variant="outline" className="bg-transparent" onClick={() => { setShowMetForm(false); setCardNumber(""); setCardError("") }}>Cancelar</Button>
                       </div>
                     </div>
                   )}
@@ -691,5 +970,13 @@ export default function AccountPage() {
 
       <Footer />
     </main>
+  )
+}
+
+export default function AccountPage() {
+  return (
+    <Suspense>
+      <AccountPageInner />
+    </Suspense>
   )
 }

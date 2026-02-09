@@ -19,6 +19,7 @@ export interface UsuarioUpdate {
   nombre?: string
   email?: string
   telefono?: string
+  foto_url?: string | null
 }
 
 export interface PasswordChange {
@@ -32,6 +33,7 @@ export interface UsuarioResponse {
   email: string
   rol: string
   telefono: string | null
+  foto_url: string | null
   created_at: string
 }
 
@@ -282,4 +284,72 @@ export interface CartItem {
   cantidad: number
   sku: string
   max_por_pedido?: number
+}
+
+// ── Direcciones ─────────────────────────────────────────────
+
+export interface DireccionCreate {
+  etiqueta?: string
+  linea1: string
+  linea2?: string | null
+  ciudad: string
+  provincia: string
+  codigo_postal: string
+  pais?: string
+  es_principal?: boolean
+}
+
+export interface DireccionUpdate {
+  etiqueta?: string | null
+  linea1?: string | null
+  linea2?: string | null
+  ciudad?: string | null
+  provincia?: string | null
+  codigo_postal?: string | null
+  pais?: string | null
+  es_principal?: boolean | null
+}
+
+export interface DireccionResponse {
+  id: string
+  usuario_id: string
+  etiqueta: string
+  linea1: string
+  linea2: string | null
+  ciudad: string
+  provincia: string
+  codigo_postal: string
+  pais: string
+  es_principal: boolean
+  created_at: string
+}
+
+// ── Metodos de Pago ─────────────────────────────────────────
+
+export interface MetodoPagoCreate {
+  tipo?: string
+  ultimos_4: string
+  titular: string
+  expiracion: string
+  es_principal?: boolean
+}
+
+export interface MetodoPagoResponse {
+  id: string
+  usuario_id: string
+  tipo: string
+  ultimos_4: string
+  titular: string
+  expiracion: string
+  es_principal: boolean
+  created_at: string
+}
+
+// ── Favoritos ───────────────────────────────────────────────
+
+export interface FavoritoResponse {
+  id: string
+  usuario_id: string
+  producto_id: string
+  created_at: string
 }

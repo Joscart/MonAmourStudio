@@ -23,10 +23,11 @@ class UsuarioUpdate(BaseModel):
     nombre: Optional[str] = Field(None, min_length=1, max_length=120)
     email: Optional[EmailStr] = None
     telefono: Optional[str] = Field(None, max_length=30)
+    foto_url: Optional[str] = Field(None, max_length=500)
 
 
 class RoleUpdate(BaseModel):
-    rol: str = Field(..., pattern=r"^(admin|cliente|vendedor)$")
+    rol: str = Field(..., pattern=r"^(admin|cliente)$")
 
 
 class PasswordChange(BaseModel):
@@ -108,6 +109,7 @@ class UsuarioResponse(BaseModel):
     email: str
     rol: str
     telefono: Optional[str] = None
+    foto_url: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

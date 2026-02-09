@@ -18,7 +18,7 @@ const footerLinks = {
     { label: "Rastrear Pedido", href: "#" },
   ],
   empresa: [
-    { label: "Sobre Nosotros", href: "#nosotros" },
+    { label: "Sobre Nosotros", href: "/monamour" },
     { label: "Nuestra Historia", href: "#" },
     { label: "Trabaja con Nosotros", href: "#" },
     { label: "Prensa", href: "#" },
@@ -108,8 +108,8 @@ export function Footer() {
             © {new Date().getFullYear()} Mon Amour Studio. Todos los derechos reservados.
           </p>
           <div className="flex gap-6 text-sm text-background/50">
-            <Link href="#" className="hover:text-background transition-colors">Politica de Privacidad</Link>
-            <Link href="#" className="hover:text-background transition-colors">Terminos de Servicio</Link>
+            <Link href="/privacy" className="hover:text-background transition-colors">Politica de Privacidad</Link>
+            <Link href="/terms" className="hover:text-background transition-colors">Terminos de Servicio</Link>
           </div>
         </div>
       </div>

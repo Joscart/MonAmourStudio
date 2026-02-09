@@ -31,10 +31,10 @@ export function Header() {
             <Link href="/products" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors">
               TIENDA
             </Link>
-            <Link href="#colecciones" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors">
+            <Link href="/collections" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors">
               COLECCIONES
             </Link>
-            <Link href="#nosotros" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors">
+            <Link href="/monamour" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors">
               NOSOTROS
             </Link>
           </nav>
@@ -53,12 +53,12 @@ export function Header() {
 
           {/* Right Icons */}
           <div className="flex items-center gap-2 md:gap-4">
-            <button type="button" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Buscar">
+            <Link href="/search" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Buscar">
               <Search className="h-5 w-5" />
-            </button>
-            <button type="button" className="hidden sm:block p-2 text-foreground hover:text-primary transition-colors" aria-label="Favoritos">
+            </Link>
+            <Link href="/account?tab=favoritos" className="hidden sm:block p-2 text-foreground hover:text-primary transition-colors" aria-label="Favoritos">
               <Heart className="h-5 w-5" />
-            </button>
+            </Link>
             {isAuthenticated ? (
               <Link href="/account" className="p-2 text-foreground hover:text-primary transition-colors" aria-label="Mi cuenta" title={user?.nombre}>
                 <User className="h-5 w-5" />
@@ -87,14 +87,14 @@ export function Header() {
             <Link href="/products" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
               TIENDA
             </Link>
-            <Link href="#colecciones" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
+            <Link href="/collections" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
               COLECCIONES
             </Link>
-            <Link href="#nosotros" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
+            <Link href="/monamour" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
               NOSOTROS
             </Link>
-            <Link href="#contacto" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
-              CONTACTO
+            <Link href="/search" className="text-sm tracking-wide text-foreground hover:text-primary transition-colors py-2">
+              BUSCAR
             </Link>
             {isAuthenticated ? (
               <>

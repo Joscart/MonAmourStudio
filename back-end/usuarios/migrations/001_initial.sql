@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     password_hash TEXT          NOT NULL,
     rol           VARCHAR(30)   NOT NULL DEFAULT 'cliente',
     telefono      VARCHAR(30),
+    foto_url      VARCHAR(500),
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 

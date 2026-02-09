@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from app.schemas import (
     UsuarioUpdate,
 )
 from app.services.usuarios import UsuarioService
+from app.services.storage import upload_avatar, delete_avatar, get_public_url
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 security = HTTPBearer()
@@ -132,6 +133,54 @@ async def delete_own_account(
     deleted = await service.delete_own_account(db, current_user["id"])
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+    return None
+
+
+@router.post("/me/foto", response_model=UsuarioResponse)
+async def upload_profile_photo(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload or replace the user's profile photo."""
+    contents = await file.read()
+    content_type = file.content_type or "application/octet-stream"
+    user_id = str(current_user["id"])
+
+    try:
+        object_name = upload_avatar(contents, content_type, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    foto_url = get_public_url(object_name)
+
+    # Delete old avatar if exists
+    user = await service.get_by_id(db, current_user["id"])
+    if user and user.foto_url:
+        old_key = user.foto_url.replace(f"/storage/{settings.MINIO_BUCKET}/", "")
+        if old_key:
+            delete_avatar(old_key)
+
+    updated = await service.update_profile(
+        db, current_user["id"], UsuarioUpdate(foto_url=foto_url)
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return updated
+
+
+@router.delete("/me/foto", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_profile_photo(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the user's profile photo."""
+    user = await service.get_by_id(db, current_user["id"])
+    if user and user.foto_url:
+        old_key = user.foto_url.replace(f"/storage/{settings.MINIO_BUCKET}/", "")
+        if old_key:
+            delete_avatar(old_key)
+        await service.update_profile(db, current_user["id"], UsuarioUpdate(foto_url=None))
     return None
 
 

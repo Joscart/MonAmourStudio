@@ -382,6 +382,7 @@ services:
         mc mb --ignore-existing local/deliveries;
         mc mb --ignore-existing local/campaigns;
         mc anonymous set download local/inventory;
+        mc anonymous set download local/users;
         echo 'Buckets created and policies set';
       "
     networks:

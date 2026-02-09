@@ -1156,13 +1156,10 @@ export default function AdminDashboard() {
                                       className={`appearance-none text-xs font-medium px-3 py-1.5 pr-7 rounded-full border-0 focus:ring-2 focus:ring-primary cursor-pointer ${
                                         customer.rol === "admin"
                                           ? "bg-purple-100 text-purple-700"
-                                          : customer.rol === "vendedor"
-                                            ? "bg-blue-100 text-blue-700"
-                                            : "bg-gray-100 text-gray-700"
+                                          : "bg-gray-100 text-gray-700"
                                       } ${roleUpdating === customer.id ? "opacity-50" : ""}`}
                                     >
                                       <option value="cliente">cliente</option>
-                                      <option value="vendedor">vendedor</option>
                                       <option value="admin">admin</option>
                                     </select>
                                     )}
@@ -1231,9 +1228,7 @@ export default function AdminDashboard() {
                           <span className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
                             selectedCustomer.rol === "admin"
                               ? "bg-purple-100 text-purple-700"
-                              : selectedCustomer.rol === "vendedor"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-gray-100 text-gray-700"
+                              : "bg-gray-100 text-gray-700"
                           }`}>
                             {selectedCustomer.rol === "admin" ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
                             {selectedCustomer.rol}
@@ -1278,7 +1273,6 @@ export default function AdminDashboard() {
                               className="flex-1 appearance-none bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="cliente">Cliente</option>
-                              <option value="vendedor">Vendedor</option>
                               <option value="admin">Administrador</option>
                             </select>
                           </div>

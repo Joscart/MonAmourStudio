@@ -27,6 +27,7 @@ class Usuario(Base):
     )
 
     telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    foto_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     sesiones: Mapped[list["Sesion"]] = relationship(
         back_populates="usuario", cascade="all, delete-orphan"
