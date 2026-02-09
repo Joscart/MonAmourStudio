@@ -43,12 +43,13 @@ message GetProductRequest {
 }
 
 message ProductResponse {
-  string producto_id  = 1;
-  string sku          = 2;
-  string nombre       = 3;
-  string descripcion  = 4;
-  double precio       = 5;
-  string moneda       = 6;
-  int32  stock        = 7;
-  string imagen_url   = 8;
+  string producto_id    = 1;
+  string sku            = 2;
+  string nombre         = 3;
+  string descripcion    = 4;
+  double precio         = 5;
+  string moneda         = 6;
+  int32  disponibilidad = 7;
+  int32  max_por_pedido = 8;
+  string imagen_url     = 9;
 }

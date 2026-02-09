@@ -676,7 +676,7 @@ export default function PaymentPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">{item.nombre}</p>
                         <p className="text-xs text-muted-foreground">{item.sku}</p>
-                        <p className="text-sm text-foreground">${item.precio.toFixed(2)}</p>
+                        <p className="text-sm text-foreground">${Number(item.precio).toFixed(2)}</p>
                       </div>
                     </div>
                   ))}

@@ -41,16 +41,30 @@ export interface ProductoCreate {
   descripcion: string
   precio: number
   moneda?: string
-  stock?: number
+  disponibilidad?: number
+  max_por_pedido?: number
   imagen_url?: string
+  envio_gratis_umbral?: number | null
+  tipo_producto_id?: string | null
+  garantia_id?: string | null
+  empaque_id?: string | null
+  descuento_id?: string | null
+  imagen_preview_url?: string | null
 }
 
 export interface ProductoUpdate {
   nombre?: string
   descripcion?: string
   precio?: number
-  stock?: number
+  disponibilidad?: number
+  max_por_pedido?: number
   imagen_url?: string
+  envio_gratis_umbral?: number | null
+  tipo_producto_id?: string | null
+  garantia_id?: string | null
+  empaque_id?: string | null
+  descuento_id?: string | null
+  imagen_preview_url?: string | null
 }
 
 export interface ProductoResponse {
@@ -60,10 +74,112 @@ export interface ProductoResponse {
   descripcion: string
   precio: number
   moneda: string
-  stock: number
+  disponibilidad: number
+  max_por_pedido: number
   imagen_url: string | null
+  envio_gratis_umbral: number | null
+  imagen_preview_url: string | null
+  calificacion_promedio: number
+  total_resenas: number
+  tipo_producto_id: string | null
+  garantia_id: string | null
+  empaque_id: string | null
+  descuento_id: string | null
+  tipo_producto_nombre: string | null
+  garantia_nombre: string | null
+  garantia_dias: number | null
+  empaque_nombre: string | null
+  descuento_nombre: string | null
+  descuento_porcentaje: number | null
+  tamanos: TamanoResponse[]
   created_at: string
-  updated_at: string
+}
+
+// ── Tipos de producto ───────────────────────────────────────
+
+export interface TipoProductoCreate {
+  nombre: string
+}
+
+export interface TipoProductoResponse {
+  id: string
+  nombre: string
+  created_at: string
+}
+
+// ── Garantías ─────────────────────────────────────────────────
+
+export interface GarantiaCreate {
+  nombre: string
+  dias: number
+}
+
+export interface GarantiaResponse {
+  id: string
+  nombre: string
+  dias: number
+  created_at: string
+}
+
+// ── Empaques ──────────────────────────────────────────────────
+
+export interface EmpaqueCreate {
+  nombre: string
+}
+
+export interface EmpaqueResponse {
+  id: string
+  nombre: string
+  created_at: string
+}
+
+// ── Descuentos ────────────────────────────────────────────────
+
+export interface DescuentoCreate {
+  nombre: string
+  porcentaje: number
+}
+
+export interface DescuentoResponse {
+  id: string
+  nombre: string
+  porcentaje: number
+  created_at: string
+}
+
+// ── Tamaños ──────────────────────────────────────────────────
+
+export interface TamanoCreate {
+  nombre: string
+  ancho_cm: number
+  alto_cm: number
+  precio_adicional?: number
+}
+
+export interface TamanoResponse {
+  id: string
+  producto_id: string
+  nombre: string
+  ancho_cm: number
+  alto_cm: number
+  precio_adicional: number
+}
+
+// ── Reseñas ─────────────────────────────────────────────────
+
+export interface ResenaCreate {
+  calificacion: number
+  comentario?: string
+}
+
+export interface ResenaResponse {
+  id: string
+  producto_id: string
+  usuario_id: string
+  usuario_nombre: string
+  calificacion: number
+  comentario: string | null
+  created_at: string
 }
 
 // ── Pedidos ─────────────────────────────────────────────────
@@ -158,4 +274,5 @@ export interface CartItem {
   imagen_url: string | null
   cantidad: number
   sku: string
+  max_por_pedido?: number
 }

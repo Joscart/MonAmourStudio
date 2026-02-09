@@ -127,6 +127,11 @@ export default function ProductsPage() {
                     name={product.nombre}
                     price={product.precio}
                     image={product.imagen_url || "/placeholder.svg"}
+                    disponibilidad={product.disponibilidad}
+                    maxPorPedido={product.max_por_pedido}
+                    discountPct={product.descuento_porcentaje ?? undefined}
+                    rating={product.calificacion_promedio}
+                    totalReviews={product.total_resenas}
                     onAddToCart={() =>
                       addItem({
                         id: product.id,
@@ -134,6 +139,7 @@ export default function ProductsPage() {
                         precio: product.precio,
                         imagen_url: product.imagen_url,
                         sku: product.sku,
+                        max_por_pedido: product.max_por_pedido,
                       })
                     }
                   />

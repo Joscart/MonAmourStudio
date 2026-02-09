@@ -77,7 +77,7 @@ export default function CartPage() {
                             {item.nombre}
                           </h3>
                           <p className="text-primary font-medium">
-                            ${item.precio.toFixed(2)}
+                            ${Number(item.precio).toFixed(2)}
                           </p>
                         </div>
                         <button
@@ -110,7 +110,7 @@ export default function CartPage() {
                           <Plus className="h-4 w-4" />
                         </button>
                         <span className="ml-auto text-foreground font-medium">
-                          ${(item.precio * item.cantidad).toFixed(2)}
+                          ${(Number(item.precio) * item.cantidad).toFixed(2)}
                         </span>
                       </div>
                     </div>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -9,8 +9,8 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/contexts/auth-context"
-import { inventoryApi, ordersApi, usersApi } from "@/lib/api"
-import type { ProductoResponse, PedidoResponse, UsuarioResponse } from "@/lib/types"
+import { inventoryApi, ordersApi, usersApi, productTypesApi, warrantyApi, packagingApi, discountsApi, sizesApi } from "@/lib/api"
+import type { ProductoResponse, PedidoResponse, UsuarioResponse, TipoProductoResponse, GarantiaResponse, EmpaqueResponse, DescuentoResponse } from "@/lib/types"
 import {
   LayoutDashboard,
   Package,
@@ -23,6 +23,7 @@ import {
   Eye,
   Search,
   Plus,
+  Check,
   Edit2,
   Trash2,
   ChevronDown,
@@ -32,12 +33,18 @@ import {
   Shield,
   ShieldCheck,
   X as XIcon,
+  Save,
+  AlertTriangle,
+  Upload,
+  Star,
+  Tag,
 } from "lucide-react"
 
 const menuItems = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
   { id: "pedidos", label: "Pedidos", icon: ShoppingCart },
   { id: "productos", label: "Productos", icon: Package },
+  { id: "catalogo", label: "Catalogo", icon: Tag },
   { id: "clientes", label: "Clientes", icon: Users },
   { id: "estadisticas", label: "Estadisticas", icon: BarChart3 },
   { id: "ajustes", label: "Ajustes", icon: Settings },
@@ -57,6 +64,44 @@ export default function AdminDashboard() {
   const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // ── Product CRUD state ─────────────────────────────────────
+  const [showProductForm, setShowProductForm] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<ProductoResponse | null>(null)
+  const [productForm, setProductForm] = useState({
+    sku: "",
+    nombre: "",
+    descripcion: "",
+    precio: "",
+    moneda: "USD",
+    disponibilidad: "",
+    max_por_pedido: "1",
+    imagen_url: "",
+    envio_gratis_umbral: "" as string,
+    tipo_producto_id: "" as string,
+    garantia_id: "" as string,
+    empaque_id: "" as string,
+    descuento_id: "" as string,
+  })
+  const [productSaving, setProductSaving] = useState(false)
+  const [productError, setProductError] = useState<string | null>(null)
+  const [productSearchQuery, setProductSearchQuery] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [imageUploading, setImageUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Catalog state (lookup tables) ──────────────────────────
+  const [tipos, setTipos] = useState<TipoProductoResponse[]>([])
+  const [garantias, setGarantias] = useState<GarantiaResponse[]>([])
+  const [empaques, setEmpaques] = useState<EmpaqueResponse[]>([])
+  const [descuentos, setDescuentos] = useState<DescuentoResponse[]>([])
+  const [catalogInput, setCatalogInput] = useState({ nombre: "", dias: "", porcentaje: "" })
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+
+  // Inline-creation state for product form dropdowns
+  const [inlineCreating, setInlineCreating] = useState<null | "tipo" | "garantia" | "empaque" | "descuento">(null)
+  const [inlineInput, setInlineInput] = useState({ nombre: "", dias: "", porcentaje: "" })
+
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push("/login")
@@ -68,11 +113,19 @@ export default function AdminDashboard() {
       inventoryApi.list(),
       ordersApi.list(),
       usersApi.listAll().catch(() => [] as UsuarioResponse[]),
+      productTypesApi.list().catch(() => [] as TipoProductoResponse[]),
+      warrantyApi.list().catch(() => [] as GarantiaResponse[]),
+      packagingApi.list().catch(() => [] as EmpaqueResponse[]),
+      discountsApi.list().catch(() => [] as DescuentoResponse[]),
     ])
-      .then(([prods, ords, custs]) => {
+      .then(([prods, ords, custs, tps, gars, emps, descs]) => {
         setProducts(prods)
         setOrders(ords)
         setCustomers(custs)
+        setTipos(tps)
+        setGarantias(gars)
+        setEmpaques(emps)
+        setDescuentos(descs)
       })
       .catch(() => {})
       .finally(() => setIsLoading(false))
@@ -97,13 +150,168 @@ export default function AdminDashboard() {
     }
   }
 
-  const getStockStatus = (stock: number) => {
-    if (stock === 0) return { label: "Agotado", class: "bg-red-100 text-red-700" }
-    if (stock < 10) return { label: "Stock Bajo", class: "bg-yellow-100 text-yellow-700" }
+  const getDisponibilidadStatus = (disponibilidad: number) => {
+    if (disponibilidad === 0) return { label: "No Disponible", class: "bg-red-100 text-red-700" }
+    if (disponibilidad < 5) return { label: "Baja Disp.", class: "bg-yellow-100 text-yellow-700" }
     return { label: "Disponible", class: "bg-green-100 text-green-700" }
   }
 
   const totalRevenue = orders.reduce((s, o) => s + o.total, 0)
+
+  // ── Product CRUD handlers ──────────────────────────────────
+  const resetProductForm = () => {
+    setProductForm({
+      sku: "",
+      nombre: "",
+      descripcion: "",
+      precio: "",
+      moneda: "USD",
+      disponibilidad: "",
+      max_por_pedido: "1",
+      imagen_url: "",
+      envio_gratis_umbral: "",
+      tipo_producto_id: "",
+      garantia_id: "",
+      empaque_id: "",
+      descuento_id: "",
+    })
+    setEditingProduct(null)
+    setProductError(null)
+    setImageFile(null)
+    setImagePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const openCreateProduct = () => {
+    resetProductForm()
+    setShowProductForm(true)
+  }
+
+  const openEditProduct = (product: ProductoResponse) => {
+    setEditingProduct(product)
+    setProductForm({
+      sku: product.sku,
+      nombre: product.nombre,
+      descripcion: product.descripcion || "",
+      precio: String(product.precio),
+      moneda: product.moneda,
+      disponibilidad: String(product.disponibilidad),
+      max_por_pedido: String(product.max_por_pedido),
+      imagen_url: product.imagen_url || "",
+      envio_gratis_umbral: product.envio_gratis_umbral != null ? String(product.envio_gratis_umbral) : "",
+      tipo_producto_id: product.tipo_producto_id || "",
+      garantia_id: product.garantia_id || "",
+      empaque_id: product.empaque_id || "",
+      descuento_id: product.descuento_id || "",
+    })
+    setProductError(null)
+    setShowProductForm(true)
+    setImageFile(null)
+    setImagePreview(product.imagen_url || null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const handleSaveProduct = async () => {
+    setProductError(null)
+    if (!productForm.sku.trim() || !productForm.nombre.trim() || !productForm.precio) {
+      setProductError("SKU, nombre y precio son obligatorios.")
+      return
+    }
+    const precio = parseFloat(productForm.precio)
+    if (isNaN(precio) || precio < 0) {
+      setProductError("El precio debe ser un numero valido >= 0.")
+      return
+    }
+    const disponibilidad = productForm.disponibilidad ? parseInt(productForm.disponibilidad, 10) : 0
+    const max_por_pedido = productForm.max_por_pedido ? parseInt(productForm.max_por_pedido, 10) : 1
+    if (isNaN(disponibilidad) || disponibilidad < 0) {
+      setProductError("La disponibilidad debe ser un numero >= 0.")
+      return
+    }
+    if (isNaN(max_por_pedido) || max_por_pedido < 1) {
+      setProductError("El maximo por pedido debe ser al menos 1.")
+      return
+    }
+    if (max_por_pedido > disponibilidad && disponibilidad > 0) {
+      setProductError("El maximo por pedido no puede superar la disponibilidad total.")
+      return
+    }
+
+    setProductSaving(true)
+    try {
+      // Upload image if a new file was selected
+      let finalImageUrl = productForm.imagen_url || undefined
+      if (imageFile) {
+        setImageUploading(true)
+        try {
+          const uploadResult = await inventoryApi.uploadImage(imageFile)
+          finalImageUrl = uploadResult.url
+        } catch (err: any) {
+          setProductError(err.message || "Error al subir la imagen.")
+          setProductSaving(false)
+          setImageUploading(false)
+          return
+        }
+        setImageUploading(false)
+      }
+
+      if (editingProduct) {
+        const updated = await inventoryApi.update(editingProduct.id, {
+          nombre: productForm.nombre,
+          descripcion: productForm.descripcion || undefined,
+          precio,
+          disponibilidad,
+          max_por_pedido,
+          imagen_url: finalImageUrl,
+          envio_gratis_umbral: productForm.envio_gratis_umbral ? parseFloat(productForm.envio_gratis_umbral) : null,
+          tipo_producto_id: productForm.tipo_producto_id || null,
+          garantia_id: productForm.garantia_id || null,
+          empaque_id: productForm.empaque_id || null,
+          descuento_id: productForm.descuento_id || null,
+        })
+        setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+      } else {
+        const created = await inventoryApi.create({
+          sku: productForm.sku,
+          nombre: productForm.nombre,
+          descripcion: productForm.descripcion,
+          precio,
+          moneda: productForm.moneda,
+          disponibilidad,
+          max_por_pedido,
+          imagen_url: finalImageUrl,
+          envio_gratis_umbral: productForm.envio_gratis_umbral ? parseFloat(productForm.envio_gratis_umbral) : null,
+          tipo_producto_id: productForm.tipo_producto_id || null,
+          garantia_id: productForm.garantia_id || null,
+          empaque_id: productForm.empaque_id || null,
+          descuento_id: productForm.descuento_id || null,
+        })
+        setProducts((prev) => [created, ...prev])
+      }
+      setShowProductForm(false)
+      resetProductForm()
+    } catch (err: any) {
+      setProductError(err.message || "Error al guardar producto.")
+    } finally {
+      setProductSaving(false)
+    }
+  }
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm("¿Seguro que deseas eliminar este producto? Esta accion es irreversible.")) return
+    try {
+      await inventoryApi.delete(productId)
+      setProducts((prev) => prev.filter((p) => p.id !== productId))
+    } catch {
+      // silently fail
+    }
+  }
+
+  const filteredProducts = products.filter(
+    (p) =>
+      p.nombre.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+      p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()),
+  )
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     setRoleUpdating(userId)
@@ -287,7 +495,7 @@ export default function AdminDashboard() {
                               <td className="px-5 py-4 text-sm font-medium text-foreground">{order.id.slice(0, 8)}</td>
                               <td className="px-5 py-4 text-sm text-foreground">{order.items.length}</td>
                               <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(order.fecha_creacion)}</td>
-                              <td className="px-5 py-4 text-sm font-medium text-foreground">${order.total.toFixed(2)}</td>
+                              <td className="px-5 py-4 text-sm font-medium text-foreground">${Number(order.total).toFixed(2)}</td>
                               <td className="px-5 py-4">
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
                                   {order.estado}
@@ -394,7 +602,7 @@ export default function AdminDashboard() {
                               </td>
                               <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(order.fecha_creacion)}</td>
                               <td className="px-5 py-4 text-sm text-foreground">{order.items.length}</td>
-                              <td className="px-5 py-4 text-sm font-medium text-foreground">${order.total.toFixed(2)}</td>
+                              <td className="px-5 py-4 text-sm font-medium text-foreground">${Number(order.total).toFixed(2)}</td>
                               <td className="px-5 py-4">
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
                                   {order.estado}
@@ -436,16 +644,353 @@ export default function AdminDashboard() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
                           placeholder="Buscar producto..."
+                          value={productSearchQuery}
+                          onChange={(e) => setProductSearchQuery(e.target.value)}
                           className="pl-10 bg-card border-border"
                         />
                       </div>
-                      <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                      <Button
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                        onClick={openCreateProduct}
+                      >
                         <Plus className="h-4 w-4 mr-2" />
                         Agregar
                       </Button>
                     </div>
                   </div>
 
+                  {/* Product Form (Create / Edit) */}
+                  {showProductForm && (
+                    <div className="bg-card rounded-lg border border-border p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <h3 className="font-serif text-lg text-foreground">
+                          {editingProduct ? "Editar Producto" : "Nuevo Producto"}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => { setShowProductForm(false); resetProductForm() }}
+                          className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <XIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      {productError && (
+                        <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-md px-4 py-3 mb-4">
+                          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                          {productError}
+                        </div>
+                      )}
+
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">SKU *</label>
+                          <Input
+                            value={productForm.sku}
+                            onChange={(e) => setProductForm((f) => ({ ...f, sku: e.target.value }))}
+                            placeholder="FRAME-001"
+                            className="bg-background border-border"
+                            disabled={!!editingProduct}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Nombre *</label>
+                          <Input
+                            value={productForm.nombre}
+                            onChange={(e) => setProductForm((f) => ({ ...f, nombre: e.target.value }))}
+                            placeholder="Marco Romance Dorado"
+                            className="bg-background border-border"
+                          />
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                          <label className="text-sm font-medium text-foreground">Descripcion</label>
+                          <textarea
+                            value={productForm.descripcion}
+                            onChange={(e) => setProductForm((f) => ({ ...f, descripcion: e.target.value }))}
+                            placeholder="Descripcion del producto..."
+                            rows={3}
+                            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Precio (USD) *</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={productForm.precio}
+                            onChange={(e) => setProductForm((f) => ({ ...f, precio: e.target.value }))}
+                            placeholder="89.00"
+                            className="bg-background border-border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Moneda</label>
+                          <Input
+                            value={productForm.moneda}
+                            onChange={(e) => setProductForm((f) => ({ ...f, moneda: e.target.value }))}
+                            placeholder="USD"
+                            className="bg-background border-border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Disponibilidad Total
+                            <span className="text-xs text-muted-foreground ml-1">(unidades)</span>
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={productForm.disponibilidad}
+                            onChange={(e) => setProductForm((f) => ({ ...f, disponibilidad: e.target.value }))}
+                            placeholder="50"
+                            className="bg-background border-border"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Cantidad total disponible para venta.
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Max. por Pedido
+                            <span className="text-xs text-muted-foreground ml-1">(limite)</span>
+                          </label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={productForm.max_por_pedido}
+                            onChange={(e) => setProductForm((f) => ({ ...f, max_por_pedido: e.target.value }))}
+                            placeholder="3"
+                            className="bg-background border-border"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Cantidad maxima que un cliente puede pedir por orden.
+                          </p>
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                          <label className="text-sm font-medium text-foreground">Imagen del Producto</label>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) {
+                                setImageFile(file)
+                                const reader = new FileReader()
+                                reader.onload = (ev) => setImagePreview(ev.target?.result as string)
+                                reader.readAsDataURL(file)
+                              }
+                            }}
+                          />
+
+                          {imagePreview ? (
+                            <div className="flex items-center gap-4 p-3 bg-secondary/30 rounded-lg border border-border">
+                              <div className="relative w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 border border-border">
+                                <Image
+                                  src={imagePreview}
+                                  alt="Vista previa"
+                                  fill
+                                  className="object-cover"
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                {imageFile ? (
+                                  <>
+                                    <p className="text-sm font-medium text-foreground truncate">{imageFile.name}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {(imageFile.size / 1024 / 1024).toFixed(2)} MB
+                                    </p>
+                                  </>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">Imagen actual</p>
+                                )}
+                                {imageUploading && (
+                                  <div className="flex items-center gap-2 mt-1 text-primary text-xs">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Subiendo...
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex gap-2 flex-shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="bg-transparent"
+                                  onClick={() => fileInputRef.current?.click()}
+                                >
+                                  Cambiar
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="bg-transparent text-destructive hover:bg-destructive/10"
+                                  onClick={() => {
+                                    setImageFile(null)
+                                    setImagePreview(null)
+                                    setProductForm((f) => ({ ...f, imagen_url: "" }))
+                                    if (fileInputRef.current) fileInputRef.current.value = ""
+                                  }}
+                                >
+                                  <XIcon className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full border-2 border-dashed border-border rounded-lg p-8 hover:border-primary/50 transition-colors group"
+                            >
+                              <div className="flex flex-col items-center gap-2 text-muted-foreground group-hover:text-primary transition-colors">
+                                <Upload className="h-8 w-8" />
+                                <span className="text-sm font-medium">Haz clic para subir una imagen</span>
+                                <span className="text-xs">JPG, PNG, WebP o GIF — Max 10 MB</span>
+                              </div>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* New FK select fields with inline creation */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Tipo de Producto</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={productForm.tipo_producto_id}
+                              onChange={(e) => setProductForm((f) => ({ ...f, tipo_producto_id: e.target.value }))}
+                              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">Sin tipo</option>
+                              {tipos.map((t) => (<option key={t.id} value={t.id}>{t.nombre}</option>))}
+                            </select>
+                            <Button type="button" variant="outline" size="sm" className="bg-transparent h-9 w-9 p-0 flex-shrink-0" onClick={() => { setInlineCreating("tipo"); setInlineInput({ nombre: "", dias: "", porcentaje: "" }) }}><Plus className="h-4 w-4" /></Button>
+                          </div>
+                          {inlineCreating === "tipo" && (
+                            <div className="flex gap-2 items-center p-2 bg-secondary/30 rounded-md border border-border">
+                              <Input placeholder="Nombre del tipo..." value={inlineInput.nombre} onChange={(e) => setInlineInput((v) => ({ ...v, nombre: e.target.value }))} className="bg-background border-border h-8 text-sm" />
+                              <Button size="sm" className="h-8 bg-primary text-primary-foreground" disabled={!inlineInput.nombre.trim()} onClick={async () => {
+                                try { const t = await productTypesApi.create({ nombre: inlineInput.nombre.trim() }); setTipos((prev) => [...prev, t]); setProductForm((f) => ({ ...f, tipo_producto_id: t.id })); setInlineCreating(null) } catch (err: any) { setProductError(err.message) }
+                              }}><Check className="h-3.5 w-3.5" /></Button>
+                              <Button size="sm" variant="outline" className="h-8 bg-transparent" onClick={() => setInlineCreating(null)}><XIcon className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Garantia</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={productForm.garantia_id}
+                              onChange={(e) => setProductForm((f) => ({ ...f, garantia_id: e.target.value }))}
+                              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">Sin garantia</option>
+                              {garantias.map((g) => (<option key={g.id} value={g.id}>{g.nombre} ({g.dias} dias)</option>))}
+                            </select>
+                            <Button type="button" variant="outline" size="sm" className="bg-transparent h-9 w-9 p-0 flex-shrink-0" onClick={() => { setInlineCreating("garantia"); setInlineInput({ nombre: "", dias: "", porcentaje: "" }) }}><Plus className="h-4 w-4" /></Button>
+                          </div>
+                          {inlineCreating === "garantia" && (
+                            <div className="flex gap-2 items-center p-2 bg-secondary/30 rounded-md border border-border">
+                              <Input placeholder="Nombre..." value={inlineInput.nombre} onChange={(e) => setInlineInput((v) => ({ ...v, nombre: e.target.value }))} className="bg-background border-border h-8 text-sm flex-1" />
+                              <Input type="number" min="1" placeholder="Dias" value={inlineInput.dias} onChange={(e) => setInlineInput((v) => ({ ...v, dias: e.target.value }))} className="bg-background border-border h-8 text-sm w-20" />
+                              <Button size="sm" className="h-8 bg-primary text-primary-foreground" disabled={!inlineInput.nombre.trim() || !inlineInput.dias} onClick={async () => {
+                                try { const g = await warrantyApi.create({ nombre: inlineInput.nombre.trim(), dias: parseInt(inlineInput.dias) }); setGarantias((prev) => [...prev, g]); setProductForm((f) => ({ ...f, garantia_id: g.id })); setInlineCreating(null) } catch (err: any) { setProductError(err.message) }
+                              }}><Check className="h-3.5 w-3.5" /></Button>
+                              <Button size="sm" variant="outline" className="h-8 bg-transparent" onClick={() => setInlineCreating(null)}><XIcon className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Empaque</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={productForm.empaque_id}
+                              onChange={(e) => setProductForm((f) => ({ ...f, empaque_id: e.target.value }))}
+                              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">Sin empaque especial</option>
+                              {empaques.map((e) => (<option key={e.id} value={e.id}>{e.nombre}</option>))}
+                            </select>
+                            <Button type="button" variant="outline" size="sm" className="bg-transparent h-9 w-9 p-0 flex-shrink-0" onClick={() => { setInlineCreating("empaque"); setInlineInput({ nombre: "", dias: "", porcentaje: "" }) }}><Plus className="h-4 w-4" /></Button>
+                          </div>
+                          {inlineCreating === "empaque" && (
+                            <div className="flex gap-2 items-center p-2 bg-secondary/30 rounded-md border border-border">
+                              <Input placeholder="Nombre del empaque..." value={inlineInput.nombre} onChange={(e) => setInlineInput((v) => ({ ...v, nombre: e.target.value }))} className="bg-background border-border h-8 text-sm" />
+                              <Button size="sm" className="h-8 bg-primary text-primary-foreground" disabled={!inlineInput.nombre.trim()} onClick={async () => {
+                                try { const e = await packagingApi.create({ nombre: inlineInput.nombre.trim() }); setEmpaques((prev) => [...prev, e]); setProductForm((f) => ({ ...f, empaque_id: e.id })); setInlineCreating(null) } catch (err: any) { setProductError(err.message) }
+                              }}><Check className="h-3.5 w-3.5" /></Button>
+                              <Button size="sm" variant="outline" className="h-8 bg-transparent" onClick={() => setInlineCreating(null)}><XIcon className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">Descuento</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={productForm.descuento_id}
+                              onChange={(e) => setProductForm((f) => ({ ...f, descuento_id: e.target.value }))}
+                              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">Sin descuento</option>
+                              {descuentos.map((d) => (<option key={d.id} value={d.id}>{d.nombre} ({d.porcentaje}%)</option>))}
+                            </select>
+                            <Button type="button" variant="outline" size="sm" className="bg-transparent h-9 w-9 p-0 flex-shrink-0" onClick={() => { setInlineCreating("descuento"); setInlineInput({ nombre: "", dias: "", porcentaje: "" }) }}><Plus className="h-4 w-4" /></Button>
+                          </div>
+                          {inlineCreating === "descuento" && (
+                            <div className="flex gap-2 items-center p-2 bg-secondary/30 rounded-md border border-border">
+                              <Input placeholder="Nombre..." value={inlineInput.nombre} onChange={(e) => setInlineInput((v) => ({ ...v, nombre: e.target.value }))} className="bg-background border-border h-8 text-sm flex-1" />
+                              <Input type="number" min="1" max="100" placeholder="%" value={inlineInput.porcentaje} onChange={(e) => setInlineInput((v) => ({ ...v, porcentaje: e.target.value }))} className="bg-background border-border h-8 text-sm w-20" />
+                              <Button size="sm" className="h-8 bg-primary text-primary-foreground" disabled={!inlineInput.nombre.trim() || !inlineInput.porcentaje} onClick={async () => {
+                                try { const d = await discountsApi.create({ nombre: inlineInput.nombre.trim(), porcentaje: parseFloat(inlineInput.porcentaje) }); setDescuentos((prev) => [...prev, d]); setProductForm((f) => ({ ...f, descuento_id: d.id })); setInlineCreating(null) } catch (err: any) { setProductError(err.message) }
+                              }}><Check className="h-3.5 w-3.5" /></Button>
+                              <Button size="sm" variant="outline" className="h-8 bg-transparent" onClick={() => setInlineCreating(null)}><XIcon className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Umbral Envio Gratis (USD)
+                            <span className="text-xs text-muted-foreground ml-1">(vacio = sin envio gratis, 0 = siempre gratis)</span>
+                          </label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={productForm.envio_gratis_umbral}
+                            onChange={(e) => setProductForm((f) => ({ ...f, envio_gratis_umbral: e.target.value }))}
+                            placeholder="100.00"
+                            className="bg-background border-border"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border">
+                        <Button
+                          variant="outline"
+                          className="bg-transparent"
+                          onClick={() => { setShowProductForm(false); resetProductForm() }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                          onClick={handleSaveProduct}
+                          disabled={productSaving}
+                        >
+                          {productSaving ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4 mr-2" />
+                          )}
+                          {editingProduct ? "Actualizar" : "Crear Producto"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Products Table */}
                   <div className="bg-card rounded-lg border border-border overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -454,14 +999,15 @@ export default function AdminDashboard() {
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Producto</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">SKU</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Precio</th>
-                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Stock</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Disponibilidad</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Max/Pedido</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Estado</th>
                             <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {products.map((product) => {
-                            const stockStatus = getStockStatus(product.stock)
+                          {filteredProducts.map((product) => {
+                            const dispStatus = getDisponibilidadStatus(product.disponibilidad)
                             return (
                               <tr key={product.id} className="hover:bg-secondary/30 transition-colors">
                                 <td className="px-5 py-4">
@@ -478,19 +1024,34 @@ export default function AdminDashboard() {
                                   </div>
                                 </td>
                                 <td className="px-5 py-4 text-sm text-muted-foreground">{product.sku}</td>
-                                <td className="px-5 py-4 text-sm font-medium text-foreground">${product.precio.toFixed(2)}</td>
-                                <td className="px-5 py-4 text-sm text-foreground">{product.stock}</td>
+                                <td className="px-5 py-4 text-sm font-medium text-foreground">${Number(product.precio).toFixed(2)}</td>
+                                <td className="px-5 py-4 text-sm text-foreground">{product.disponibilidad}</td>
                                 <td className="px-5 py-4">
-                                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${stockStatus.class}`}>
-                                    {stockStatus.label}
+                                  <span className="text-sm font-medium text-foreground bg-secondary/60 px-2 py-0.5 rounded">
+                                    {product.max_por_pedido}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-4">
+                                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${dispStatus.class}`}>
+                                    {dispStatus.label}
                                   </span>
                                 </td>
                                 <td className="px-5 py-4">
                                   <div className="flex gap-2">
-                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0 bg-transparent">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 bg-transparent"
+                                      onClick={() => openEditProduct(product)}
+                                    >
                                       <Edit2 className="h-4 w-4" />
                                     </Button>
-                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 bg-transparent">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 bg-transparent"
+                                      onClick={() => handleDeleteProduct(product.id)}
+                                    >
                                       <Trash2 className="h-4 w-4" />
                                     </Button>
                                   </div>
@@ -498,10 +1059,12 @@ export default function AdminDashboard() {
                               </tr>
                             )
                           })}
-                          {products.length === 0 && (
+                          {filteredProducts.length === 0 && (
                             <tr>
-                              <td colSpan={6} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                                No hay productos registrados.
+                              <td colSpan={7} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                                {productSearchQuery
+                                  ? "No se encontraron productos con esa busqueda."
+                                  : "No hay productos registrados. Haz clic en \"Agregar\" para crear uno."}
                               </td>
                             </tr>
                           )}
@@ -686,6 +1249,121 @@ export default function AdminDashboard() {
                 </div>
               )}
 
+              {/* Catalogo Section (Lookup Tables Management) */}
+              {activeSection === "catalogo" && (
+                <div className="space-y-6">
+                  <h2 className="font-serif text-xl text-foreground">Gestion de Catalogo</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Administra los tipos de producto, garantias, empaques y descuentos disponibles para asignar a los productos.
+                  </p>
+
+                  {catalogError && (
+                    <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-md px-4 py-3">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                      {catalogError}
+                    </div>
+                  )}
+
+                  <div className="grid sm:grid-cols-2 gap-6">
+                    {/* Tipos de Producto */}
+                    <div className="bg-card rounded-lg border border-border p-5">
+                      <h3 className="font-medium text-foreground mb-4">Tipos de Producto</h3>
+                      <div className="flex gap-2 mb-4">
+                        <Input
+                          placeholder="Nuevo tipo..."
+                          value={catalogInput.nombre}
+                          onChange={(e) => setCatalogInput((c) => ({ ...c, nombre: e.target.value }))}
+                          className="bg-background border-border"
+                          onKeyDown={async (e) => {
+                            if (e.key === "Enter" && catalogInput.nombre.trim()) {
+                              try { const t = await productTypesApi.create({ nombre: catalogInput.nombre.trim() }); setTipos((prev) => [...prev, t]); setCatalogInput((c) => ({ ...c, nombre: "" })); setCatalogError(null) } catch (err: any) { setCatalogError(err.message) }
+                            }
+                          }}
+                        />
+                        <Button size="sm" className="bg-primary text-primary-foreground" onClick={async () => {
+                          if (!catalogInput.nombre.trim()) return
+                          try { const t = await productTypesApi.create({ nombre: catalogInput.nombre.trim() }); setTipos((prev) => [...prev, t]); setCatalogInput((c) => ({ ...c, nombre: "" })); setCatalogError(null) } catch (err: any) { setCatalogError(err.message) }
+                        }}><Plus className="h-4 w-4" /></Button>
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {tipos.map((t) => (
+                          <div key={t.id} className="flex items-center justify-between bg-secondary/30 rounded px-3 py-2 text-sm">
+                            <span>{t.nombre}</span>
+                            <button type="button" onClick={async () => { await productTypesApi.delete(t.id); setTipos((prev) => prev.filter((x) => x.id !== t.id)) }} className="text-destructive hover:text-destructive/80"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                        {tipos.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No hay tipos creados.</p>}
+                      </div>
+                    </div>
+
+                    {/* Garantias */}
+                    <div className="bg-card rounded-lg border border-border p-5">
+                      <h3 className="font-medium text-foreground mb-4">Garantias</h3>
+                      <div className="flex gap-2 mb-4">
+                        <Input placeholder="Nombre..." value={catalogInput.nombre} onChange={(e) => setCatalogInput((c) => ({ ...c, nombre: e.target.value }))} className="bg-background border-border flex-1" />
+                        <Input type="number" min="1" placeholder="Dias" value={catalogInput.dias} onChange={(e) => setCatalogInput((c) => ({ ...c, dias: e.target.value }))} className="bg-background border-border w-20" />
+                        <Button size="sm" className="bg-primary text-primary-foreground" onClick={async () => {
+                          if (!catalogInput.nombre.trim() || !catalogInput.dias) return
+                          try { const g = await warrantyApi.create({ nombre: catalogInput.nombre.trim(), dias: parseInt(catalogInput.dias) }); setGarantias((prev) => [...prev, g]); setCatalogInput((c) => ({ ...c, nombre: "", dias: "" })); setCatalogError(null) } catch (err: any) { setCatalogError(err.message) }
+                        }}><Plus className="h-4 w-4" /></Button>
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {garantias.map((g) => (
+                          <div key={g.id} className="flex items-center justify-between bg-secondary/30 rounded px-3 py-2 text-sm">
+                            <span>{g.nombre} <span className="text-muted-foreground">({g.dias} dias)</span></span>
+                            <button type="button" onClick={async () => { await warrantyApi.delete(g.id); setGarantias((prev) => prev.filter((x) => x.id !== g.id)) }} className="text-destructive hover:text-destructive/80"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                        {garantias.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No hay garantias creadas.</p>}
+                      </div>
+                    </div>
+
+                    {/* Empaques */}
+                    <div className="bg-card rounded-lg border border-border p-5">
+                      <h3 className="font-medium text-foreground mb-4">Empaques</h3>
+                      <div className="flex gap-2 mb-4">
+                        <Input placeholder="Nuevo empaque..." value={catalogInput.nombre} onChange={(e) => setCatalogInput((c) => ({ ...c, nombre: e.target.value }))} className="bg-background border-border" />
+                        <Button size="sm" className="bg-primary text-primary-foreground" onClick={async () => {
+                          if (!catalogInput.nombre.trim()) return
+                          try { const e = await packagingApi.create({ nombre: catalogInput.nombre.trim() }); setEmpaques((prev) => [...prev, e]); setCatalogInput((c) => ({ ...c, nombre: "" })); setCatalogError(null) } catch (err: any) { setCatalogError(err.message) }
+                        }}><Plus className="h-4 w-4" /></Button>
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {empaques.map((e) => (
+                          <div key={e.id} className="flex items-center justify-between bg-secondary/30 rounded px-3 py-2 text-sm">
+                            <span>{e.nombre}</span>
+                            <button type="button" onClick={async () => { await packagingApi.delete(e.id); setEmpaques((prev) => prev.filter((x) => x.id !== e.id)) }} className="text-destructive hover:text-destructive/80"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                        {empaques.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No hay empaques creados.</p>}
+                      </div>
+                    </div>
+
+                    {/* Descuentos */}
+                    <div className="bg-card rounded-lg border border-border p-5">
+                      <h3 className="font-medium text-foreground mb-4">Descuentos</h3>
+                      <div className="flex gap-2 mb-4">
+                        <Input placeholder="Nombre..." value={catalogInput.nombre} onChange={(e) => setCatalogInput((c) => ({ ...c, nombre: e.target.value }))} className="bg-background border-border flex-1" />
+                        <Input type="number" min="1" max="100" placeholder="%" value={catalogInput.porcentaje} onChange={(e) => setCatalogInput((c) => ({ ...c, porcentaje: e.target.value }))} className="bg-background border-border w-20" />
+                        <Button size="sm" className="bg-primary text-primary-foreground" onClick={async () => {
+                          if (!catalogInput.nombre.trim() || !catalogInput.porcentaje) return
+                          try { const d = await discountsApi.create({ nombre: catalogInput.nombre.trim(), porcentaje: parseFloat(catalogInput.porcentaje) }); setDescuentos((prev) => [...prev, d]); setCatalogInput((c) => ({ ...c, nombre: "", porcentaje: "" })); setCatalogError(null) } catch (err: any) { setCatalogError(err.message) }
+                        }}><Plus className="h-4 w-4" /></Button>
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {descuentos.map((d) => (
+                          <div key={d.id} className="flex items-center justify-between bg-secondary/30 rounded px-3 py-2 text-sm">
+                            <span>{d.nombre} <span className="text-primary font-medium">-{d.porcentaje}%</span></span>
+                            <button type="button" onClick={async () => { await discountsApi.delete(d.id); setDescuentos((prev) => prev.filter((x) => x.id !== d.id)) }} className="text-destructive hover:text-destructive/80"><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                        {descuentos.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No hay descuentos creados.</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Statistics Section */}
               {activeSection === "estadisticas" && (
                 <div className="space-y-6">
@@ -730,19 +1408,19 @@ export default function AdminDashboard() {
                         {[
                           {
                             name: "Disponible",
-                            value: products.filter((p) => p.stock >= 10).length,
+                            value: products.filter((p) => p.disponibilidad >= 5).length,
                             total: products.length,
                             color: "bg-green-500",
                           },
                           {
-                            name: "Stock Bajo",
-                            value: products.filter((p) => p.stock > 0 && p.stock < 10).length,
+                            name: "Baja Disponibilidad",
+                            value: products.filter((p) => p.disponibilidad > 0 && p.disponibilidad < 5).length,
                             total: products.length,
                             color: "bg-yellow-500",
                           },
                           {
-                            name: "Agotado",
-                            value: products.filter((p) => p.stock === 0).length,
+                            name: "No Disponible",
+                            value: products.filter((p) => p.disponibilidad === 0).length,
                             total: products.length,
                             color: "bg-red-500",
                           },
@@ -789,7 +1467,7 @@ export default function AdminDashboard() {
                             <p className="text-sm font-medium text-foreground truncate">{product.nombre}</p>
                             <p className="text-xs text-muted-foreground">{product.sku}</p>
                           </div>
-                          <p className="text-sm font-medium text-foreground">${product.precio.toFixed(2)}</p>
+                          <p className="text-sm font-medium text-foreground">${Number(product.precio).toFixed(2)}</p>
                         </div>
                       ))}
                       {products.length === 0 && (

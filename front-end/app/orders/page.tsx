@@ -190,7 +190,7 @@ export default function OrdersPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <p className="font-semibold text-foreground text-lg">${order.total.toFixed(2)}</p>
+                        <p className="font-semibold text-foreground text-lg">${Number(order.total).toFixed(2)}</p>
                         <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                       </div>
                     </button>
@@ -234,10 +234,10 @@ export default function OrdersPage() {
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium text-foreground">Producto</p>
                                     <p className="text-xs text-muted-foreground">
-                                      Cantidad: {item.cantidad} | ${item.precio_unitario.toFixed(2)} c/u
+                                      Cantidad: {item.cantidad} | ${Number(item.precio_unitario).toFixed(2)} c/u
                                     </p>
                                     <p className="text-sm font-medium text-foreground mt-1">
-                                      ${(item.cantidad * item.precio_unitario).toFixed(2)}
+                                      ${(item.cantidad * Number(item.precio_unitario)).toFixed(2)}
                                     </p>
                                   </div>
                                 </div>
@@ -265,9 +265,9 @@ export default function OrdersPage() {
                                 Resumen
                               </h4>
                               <div className="text-sm text-muted-foreground space-y-1">
-                                <p>Subtotal: ${order.subtotal.toFixed(2)}</p>
-                                <p>Envio: ${order.shipping.toFixed(2)}</p>
-                                <p className="text-foreground font-medium">Total: ${order.total.toFixed(2)}</p>
+                                <p>Subtotal: ${Number(order.subtotal).toFixed(2)}</p>
+                                <p>Envio: ${Number(order.shipping).toFixed(2)}</p>
+                                <p className="text-foreground font-medium">Total: ${Number(order.total).toFixed(2)}</p>
                               </div>
                             </div>
 

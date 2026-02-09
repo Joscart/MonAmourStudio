@@ -287,7 +287,7 @@ export default function AccountPage() {
                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.estado)}`}>
                               {order.estado}
                             </span>
-                            <span className="font-medium text-foreground">${order.total.toFixed(2)}</span>
+                            <span className="font-medium text-foreground">${Number(order.total).toFixed(2)}</span>
                           </div>
                         </div>
                         <div className="space-y-3">
@@ -300,7 +300,7 @@ export default function AccountPage() {
                                 <p className="text-sm font-medium text-foreground truncate">Producto #{item.producto_id}</p>
                                 <p className="text-sm text-muted-foreground">Cantidad: {item.cantidad}</p>
                               </div>
-                              <p className="text-sm font-medium text-foreground">${item.precio_unitario.toFixed(2)}</p>
+                              <p className="text-sm font-medium text-foreground">${Number(item.precio_unitario).toFixed(2)}</p>
                             </div>
                           ))}
                         </div>

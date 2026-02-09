@@ -25,6 +25,18 @@ import type {
   EntregaResponse,
   CampanaResponse,
   EstadoUpdate,
+  TipoProductoResponse,
+  TipoProductoCreate,
+  GarantiaResponse,
+  GarantiaCreate,
+  EmpaqueResponse,
+  EmpaqueCreate,
+  DescuentoResponse,
+  DescuentoCreate,
+  TamanoResponse,
+  TamanoCreate,
+  ResenaCreate,
+  ResenaResponse,
 } from "./types"
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -118,8 +130,29 @@ export const usersApi = {
 
 /* ── Inventario ──────────────────────────────────────────── */
 
+/** Ensure numeric fields are actual numbers (PostgreSQL DECIMAL comes as string) */
+function normalizeProduct(p: ProductoResponse): ProductoResponse {
+  return {
+    ...p,
+    precio: Number(p.precio),
+    disponibilidad: Number(p.disponibilidad),
+    max_por_pedido: Number(p.max_por_pedido),
+    envio_gratis_umbral: p.envio_gratis_umbral != null ? Number(p.envio_gratis_umbral) : null,
+    calificacion_promedio: Number(p.calificacion_promedio),
+    total_resenas: Number(p.total_resenas),
+    garantia_dias: p.garantia_dias != null ? Number(p.garantia_dias) : null,
+    descuento_porcentaje: p.descuento_porcentaje != null ? Number(p.descuento_porcentaje) : null,
+    tamanos: (p.tamanos ?? []).map(t => ({
+      ...t,
+      ancho_cm: Number(t.ancho_cm),
+      alto_cm: Number(t.alto_cm),
+      precio_adicional: Number(t.precio_adicional),
+    })),
+  }
+}
+
 export const inventoryApi = {
-  list(params?: { search?: string; min_price?: number; max_price?: number; limit?: number; offset?: number }) {
+  async list(params?: { search?: string; min_price?: number; max_price?: number; limit?: number; offset?: number }) {
     const qs = new URLSearchParams()
     if (params?.search) qs.set("search", params.search)
     if (params?.min_price != null) qs.set("min_price", String(params.min_price))
@@ -127,29 +160,169 @@ export const inventoryApi = {
     if (params?.limit != null) qs.set("limit", String(params.limit))
     if (params?.offset != null) qs.set("offset", String(params.offset))
     const q = qs.toString()
-    return request<ProductoResponse[]>(`/api/inventory/${q ? `?${q}` : ""}`)
+    const items = await request<ProductoResponse[]>(`/api/inventory/${q ? `?${q}` : ""}`)
+    return items.map(normalizeProduct)
   },
 
-  get(productId: string) {
-    return request<ProductoResponse>(`/api/inventory/${productId}`)
+  async get(productId: string) {
+    const item = await request<ProductoResponse>(`/api/inventory/${productId}`)
+    return normalizeProduct(item)
   },
 
-  create(data: ProductoCreate) {
-    return request<ProductoResponse>("/api/inventory/", {
+  async create(data: ProductoCreate) {
+    const item = await request<ProductoResponse>("/api/inventory/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+    return normalizeProduct(item)
+  },
+
+  async update(productId: string, data: ProductoUpdate) {
+    const item = await request<ProductoResponse>(`/api/inventory/${productId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+    return normalizeProduct(item)
+  },
+
+  delete(productId: string) {
+    return request<void>(`/api/inventory/${productId}`, { method: "DELETE" })
+  },
+
+  async uploadImage(file: File): Promise<{ url: string; object_name: string }> {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const token = getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers["Authorization"] = `Bearer ${token}`
+
+    const res = await fetch("/api/inventory/upload", {
+      method: "POST",
+      headers,
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, body.detail ?? res.statusText)
+    }
+
+    return res.json()
+  },
+}
+
+/* ── Tipos de producto ───────────────────────────────────── */
+
+export const productTypesApi = {
+  list() {
+    return request<TipoProductoResponse[]>("/api/inventory/tipos")
+  },
+
+  create(data: TipoProductoCreate) {
+    return request<TipoProductoResponse>("/api/inventory/tipos", {
       method: "POST",
       body: JSON.stringify(data),
     })
   },
 
-  update(productId: string, data: ProductoUpdate) {
-    return request<ProductoResponse>(`/api/inventory/${productId}`, {
-      method: "PUT",
+  delete(tipoId: string) {
+    return request<void>(`/api/inventory/tipos/${tipoId}`, { method: "DELETE" })
+  },
+}
+
+/* ── Garantías ─────────────────────────────────────────────── */
+
+export const warrantyApi = {
+  list() {
+    return request<GarantiaResponse[]>("/api/inventory/garantias")
+  },
+  create(data: GarantiaCreate) {
+    return request<GarantiaResponse>("/api/inventory/garantias", {
+      method: "POST",
       body: JSON.stringify(data),
     })
   },
+  delete(id: string) {
+    return request<void>(`/api/inventory/garantias/${id}`, { method: "DELETE" })
+  },
+}
 
-  delete(productId: string) {
-    return request<void>(`/api/inventory/${productId}`, { method: "DELETE" })
+/* ── Empaques ──────────────────────────────────────────────── */
+
+export const packagingApi = {
+  list() {
+    return request<EmpaqueResponse[]>("/api/inventory/empaques")
+  },
+  create(data: EmpaqueCreate) {
+    return request<EmpaqueResponse>("/api/inventory/empaques", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+  delete(id: string) {
+    return request<void>(`/api/inventory/empaques/${id}`, { method: "DELETE" })
+  },
+}
+
+/* ── Descuentos ────────────────────────────────────────────── */
+
+export const discountsApi = {
+  list() {
+    return request<DescuentoResponse[]>("/api/inventory/descuentos")
+  },
+  create(data: DescuentoCreate) {
+    return request<DescuentoResponse>("/api/inventory/descuentos", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+  delete(id: string) {
+    return request<void>(`/api/inventory/descuentos/${id}`, { method: "DELETE" })
+  },
+}
+
+/* ── Tamaños (per product) ─────────────────────────────────── */
+
+export const sizesApi = {
+  list(productId: string) {
+    return request<TamanoResponse[]>(`/api/inventory/${productId}/tamanos`)
+  },
+  create(productId: string, data: TamanoCreate) {
+    return request<TamanoResponse>(`/api/inventory/${productId}/tamanos`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+  delete(productId: string, tamanoId: string) {
+    return request<void>(`/api/inventory/${productId}/tamanos/${tamanoId}`, {
+      method: "DELETE",
+    })
+  },
+}
+
+/* ── Reseñas ─────────────────────────────────────────────── */
+
+export const reviewsApi = {
+  list(productId: string) {
+    return request<ResenaResponse[]>(`/api/inventory/${productId}/resenas`)
+  },
+
+  create(productId: string, data: ResenaCreate, userId: string, userName: string) {
+    return request<ResenaResponse>(`/api/inventory/${productId}/resenas`, {
+      method: "POST",
+      body: JSON.stringify(data),
+      headers: {
+        "X-User-Id": userId,
+        "X-User-Name": userName,
+      },
+    })
+  },
+
+  delete(productId: string, resenaId: string) {
+    return request<void>(`/api/inventory/${productId}/resenas/${resenaId}`, {
+      method: "DELETE",
+    })
   },
 }
 

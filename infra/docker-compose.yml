@@ -348,6 +348,16 @@ services:
       - minio_data:/data
     networks:
       - ecommerce_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio-public.rule=PathPrefix(`/storage/`)"
+      - "traefik.http.routers.minio-public.entrypoints=web,websecure"
+      - "traefik.http.routers.minio-public.priority=10"
+      - "traefik.http.routers.minio-public.tls=true"
+      - "traefik.http.routers.minio-public.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.minio-public.middlewares=minio-strip"
+      - "traefik.http.middlewares.minio-strip.stripprefix.prefixes=/storage"
+      - "traefik.http.services.minio-public.loadbalancer.server.port=9000"
     restart: unless-stopped
 
   minio-init:
@@ -367,7 +377,8 @@ services:
         mc mb --ignore-existing local/orders;
         mc mb --ignore-existing local/deliveries;
         mc mb --ignore-existing local/campaigns;
-        echo 'Buckets created successfully';
+        mc anonymous set download local/inventory;
+        echo 'Buckets created and policies set';
       "
     networks:
       - ecommerce_net

@@ -37,14 +37,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     (item: Omit<CartItem, "cantidad"> & { cantidad?: number }) => {
       setItems((prev) => {
         const existing = prev.find((i) => i.id === item.id)
+        const maxAllowed = item.max_por_pedido ?? Infinity
+        const requestedQty = item.cantidad ?? 1
+
         if (existing) {
+          const newQty = existing.cantidad + requestedQty
+          if (newQty > maxAllowed) {
+            alert(
+              `No puedes agregar mas de ${maxAllowed} unidad${maxAllowed !== 1 ? "es" : ""} de "${item.nombre}" por pedido.`,
+            )
+            return prev.map((i) =>
+              i.id === item.id ? { ...i, cantidad: maxAllowed } : i,
+            )
+          }
           return prev.map((i) =>
-            i.id === item.id
-              ? { ...i, cantidad: i.cantidad + (item.cantidad ?? 1) }
-              : i,
+            i.id === item.id ? { ...i, cantidad: newQty } : i,
           )
         }
-        return [...prev, { ...item, cantidad: item.cantidad ?? 1 }]
+
+        if (requestedQty > maxAllowed) {
+          alert(
+            `El maximo permitido de "${item.nombre}" es ${maxAllowed} por pedido.`,
+          )
+          return [...prev, { ...item, cantidad: maxAllowed }]
+        }
+        return [...prev, { ...item, cantidad: requestedQty }]
       })
     },
     [],
@@ -57,7 +74,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const updateQuantity = useCallback((id: string, cantidad: number) => {
     if (cantidad < 1) return
     setItems((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, cantidad } : i)),
+      prev.map((i) => {
+        if (i.id !== id) return i
+        const max = i.max_por_pedido ?? Infinity
+        if (cantidad > max) {
+          alert(`Maximo ${max} unidad${max !== 1 ? "es" : ""} de "${i.nombre}" por pedido.`)
+          return { ...i, cantidad: max }
+        }
+        return { ...i, cantidad }
+      }),
     )
   }, [])
 

@@ -28,16 +28,10 @@ import {
   Shield,
   Gift,
 } from "lucide-react"
-import { inventoryApi } from "@/lib/api"
+import { inventoryApi, reviewsApi } from "@/lib/api"
 import { useCart } from "@/contexts/cart-context"
-import type { ProductoResponse } from "@/lib/types"
-
-const frameSizes = [
-  { id: "s", label: "Pequeno", dimensions: "15x20cm", priceModifier: 0 },
-  { id: "m", label: "Mediano", dimensions: "20x25cm", priceModifier: 20 },
-  { id: "l", label: "Grande", dimensions: "25x30cm", priceModifier: 40 },
-  { id: "xl", label: "Extra Grande", dimensions: "30x40cm", priceModifier: 70 },
-]
+import { useAuth } from "@/contexts/auth-context"
+import type { ProductoResponse, ResenaResponse } from "@/lib/types"
 
 export default function ProductPage() {
   const params = useParams()
@@ -45,10 +39,14 @@ export default function ProductPage() {
   
   const [product, setProduct] = useState<ProductoResponse | null>(null)
   const [relatedProducts, setRelatedProducts] = useState<ProductoResponse[]>([])
+  const [reviews, setReviews] = useState<ResenaResponse[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [quantity, setQuantity] = useState(1)
-  const [selectedSize, setSelectedSize] = useState("m")
+  const [selectedSizeIdx, setSelectedSizeIdx] = useState(0)
   const [isLiked, setIsLiked] = useState(false)
+  const [reviewText, setReviewText] = useState("")
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [uploadedImage, setUploadedImage] = useState<string | null>(null)
   const [imagePosition, setImagePosition] = useState({ x: 50, y: 50 })
   const [imageScale, setImageScale] = useState(100)
@@ -60,6 +58,7 @@ export default function ProductPage() {
   const dragStartRef = useRef({ x: 0, y: 0 })
 
   const { addItem } = useCart()
+  const { user, isAuthenticated } = useAuth()
 
   useEffect(() => {
     setIsLoading(true)
@@ -67,6 +66,7 @@ export default function ProductPage() {
       .get(productId)
       .then((p) => {
         setProduct(p)
+        reviewsApi.list(productId).then(setReviews).catch(() => {})
         return inventoryApi.list({ limit: 5 })
       })
       .then((all) => setRelatedProducts(all.filter((p) => p.id !== productId).slice(0, 4)))
@@ -74,8 +74,12 @@ export default function ProductPage() {
       .finally(() => setIsLoading(false))
   }, [productId])
 
-  const selectedSizeData = frameSizes.find(s => s.id === selectedSize)!
-  const finalPrice = product.precio + selectedSizeData.priceModifier
+  const selectedSizeData = product?.tamanos?.[selectedSizeIdx]
+  const sizeExtra = selectedSizeData ? Number(selectedSizeData.precio_adicional) : 0
+  const basePrice = product?.precio ?? 0
+  const discountPct = product?.descuento_porcentaje ?? 0
+  const priceBeforeDiscount = basePrice + sizeExtra
+  const finalPrice = discountPct > 0 ? priceBeforeDiscount * (1 - discountPct / 100) : priceBeforeDiscount
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -237,14 +241,19 @@ export default function ProductPage() {
 
                 {/* Badges */}
                 <div className="absolute top-4 left-4 flex flex-col gap-2 z-20">
-                  {product.stock < 5 && product.stock > 0 && (
-                    <span className="bg-accent text-accent-foreground text-xs font-medium px-3 py-1 rounded">
-                      ULTIMAS {product.stock} UNIDADES
+                  {discountPct > 0 && (
+                    <span className="bg-green-600 text-white text-xs font-medium px-3 py-1 rounded">
+                      -{discountPct}% DESCUENTO
                     </span>
                   )}
-                  {product.stock === 0 && (
+                  {product.disponibilidad < 5 && product.disponibilidad > 0 && (
+                    <span className="bg-accent text-accent-foreground text-xs font-medium px-3 py-1 rounded">
+                      ULTIMAS {product.disponibilidad} UNIDADES
+                    </span>
+                  )}
+                  {product.disponibilidad === 0 && (
                     <span className="bg-destructive text-destructive-foreground text-xs font-medium px-3 py-1 rounded">
-                      AGOTADO
+                      NO DISPONIBLE
                     </span>
                   )}
                 </div>
@@ -301,11 +310,12 @@ export default function ProductPage() {
                 </div>
               )}
 
-              {/* Upload Section */}
+              {/* Upload Section — only show if product has preview image */}
+              {product.imagen_preview_url && (
               <div className="bg-card border border-border rounded-lg p-6">
-                <h3 className="font-serif text-lg text-foreground mb-3">Personaliza Tu Marco</h3>
+                <h3 className="font-serif text-lg text-foreground mb-3">Personaliza Tu Producto</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Sube una imagen para ver como se vera en este marco. La imagen es temporal y no se guardara.
+                  Sube una imagen para ver como se vera en este producto. La imagen es temporal y no se guardara.
                 </p>
                 
                 <input
@@ -364,6 +374,7 @@ export default function ProductPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* Product Info */}
@@ -376,10 +387,12 @@ export default function ProductPage() {
                 <div className="flex items-center gap-2 mb-4">
                   <div className="flex gap-0.5">
                     {[1, 2, 3, 4, 5].map((star) => (
-                      <Star key={star} className="h-4 w-4 fill-accent text-accent" />
+                      <Star key={star} className={`h-4 w-4 ${star <= Math.round(product.calificacion_promedio) ? "fill-accent text-accent" : "text-muted-foreground"}`} />
                     ))}
                   </div>
-                  <span className="text-sm text-muted-foreground">(48 resenas)</span>
+                  <span className="text-sm text-muted-foreground">
+                    {product.total_resenas > 0 ? `${product.calificacion_promedio.toFixed(1)} (${product.total_resenas} resena${product.total_resenas !== 1 ? "s" : ""})` : "Sin resenas"}
+                  </span>
                 </div>
 
                 <p className="text-muted-foreground leading-relaxed">{product.descripcion}</p>
@@ -387,37 +400,42 @@ export default function ProductPage() {
 
               {/* Price */}
               <div className="flex items-baseline gap-3">
-                <span className="font-serif text-3xl text-foreground">${finalPrice.toFixed(2)}</span>
-                {selectedSizeData.priceModifier > 0 && (
-                  <span className="text-sm text-muted-foreground line-through">${product.precio.toFixed(2)}</span>
+                <span className="font-serif text-3xl text-foreground">${Number(finalPrice).toFixed(2)}</span>
+                {(discountPct > 0 || sizeExtra > 0) && (
+                  <span className="text-sm text-muted-foreground line-through">${Number(basePrice + sizeExtra).toFixed(2)}</span>
+                )}
+                {discountPct > 0 && (
+                  <span className="text-sm font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded">-{discountPct}%</span>
                 )}
               </div>
 
               {/* Size Selection */}
+              {product.tamanos.length > 0 && (
               <div>
                 <label className="text-sm font-medium text-foreground mb-3 block">
-                  Tamano: <span className="text-muted-foreground font-normal">{selectedSizeData.dimensions}</span>
+                  Tamano: <span className="text-muted-foreground font-normal">{selectedSizeData ? `${selectedSizeData.ancho_cm}x${selectedSizeData.alto_cm}cm` : ""}</span>
                 </label>
                 <div className="grid grid-cols-4 gap-3">
-                  {frameSizes.map((size) => (
+                  {product.tamanos.map((size, idx) => (
                     <button
                       key={size.id}
                       type="button"
-                      onClick={() => setSelectedSize(size.id)}
+                      onClick={() => setSelectedSizeIdx(idx)}
                       className={`py-3 px-4 rounded-lg border text-sm font-medium transition-all ${
-                        selectedSize === size.id
+                        selectedSizeIdx === idx
                           ? "border-primary bg-primary/10 text-primary"
                           : "border-border hover:border-primary/50 text-foreground"
                       }`}
                     >
-                      {size.label}
-                      {size.priceModifier > 0 && (
-                        <span className="block text-xs text-muted-foreground mt-0.5">+${size.priceModifier}</span>
+                      {size.nombre}
+                      {Number(size.precio_adicional) > 0 && (
+                        <span className="block text-xs text-muted-foreground mt-0.5">+${Number(size.precio_adicional)}</span>
                       )}
                     </button>
                   ))}
                 </div>
               </div>
+              )}
 
               {/* Quantity */}
               <div>
@@ -435,15 +453,24 @@ export default function ProductPage() {
                     <span className="w-12 text-center font-medium">{quantity}</span>
                     <button
                       type="button"
-                      onClick={() => setQuantity(quantity + 1)}
+                      onClick={() => setQuantity(Math.min(product.max_por_pedido, quantity + 1))}
                       className="p-3 hover:bg-secondary transition-colors"
+                      disabled={quantity >= product.max_por_pedido}
                     >
                       <Plus className="h-4 w-4" />
                     </button>
                   </div>
-                  <span className="text-sm text-muted-foreground">
-                    {product.stock > 0 ? `${product.stock} disponibles` : "Sin stock"}
-                  </span>
+                  <div className="text-sm">
+                    {product.disponibilidad > 0 ? (
+                      <span className="text-muted-foreground">
+                        {product.disponibilidad} disponible{product.disponibilidad !== 1 ? "s" : ""}
+                        <span className="mx-1">·</span>
+                        <span className="text-primary font-medium">Max {product.max_por_pedido} por pedido</span>
+                      </span>
+                    ) : (
+                      <span className="text-destructive font-medium">No disponible</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -451,7 +478,7 @@ export default function ProductPage() {
               <div className="flex gap-4 pt-2">
                 <Button 
                   className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground h-12"
-                  disabled={product.stock === 0}
+                  disabled={product.disponibilidad === 0}
                   onClick={() => {
                     addItem({
                       id: product.id,
@@ -460,6 +487,7 @@ export default function ProductPage() {
                       imagen_url: product.imagen_url,
                       sku: product.sku,
                       cantidad: quantity,
+                      max_por_pedido: product.max_por_pedido,
                     })
                   }}
                 >
@@ -481,21 +509,29 @@ export default function ProductPage() {
 
               {/* Features */}
               <div className="grid grid-cols-3 gap-4 py-6 border-t border-b border-border">
+                {product.envio_gratis_umbral != null && (
                 <div className="text-center">
                   <Truck className="h-6 w-6 mx-auto mb-2 text-primary" />
                   <p className="text-xs text-muted-foreground">Envio Gratis</p>
-                  <p className="text-xs text-foreground font-medium">desde $100</p>
+                  <p className="text-xs text-foreground font-medium">
+                    {Number(product.envio_gratis_umbral) === 0 ? "Siempre" : `desde $${Number(product.envio_gratis_umbral).toFixed(0)}`}
+                  </p>
                 </div>
+                )}
+                {product.garantia_nombre && (
                 <div className="text-center">
                   <Shield className="h-6 w-6 mx-auto mb-2 text-primary" />
                   <p className="text-xs text-muted-foreground">Garantia</p>
-                  <p className="text-xs text-foreground font-medium">30 dias</p>
+                  <p className="text-xs text-foreground font-medium">{product.garantia_dias} dias</p>
                 </div>
+                )}
+                {product.empaque_nombre && (
                 <div className="text-center">
                   <Gift className="h-6 w-6 mx-auto mb-2 text-primary" />
                   <p className="text-xs text-muted-foreground">Empaque</p>
-                  <p className="text-xs text-foreground font-medium">de regalo</p>
+                  <p className="text-xs text-foreground font-medium">{product.empaque_nombre}</p>
                 </div>
+                )}
               </div>
 
               {/* Product Details */}
@@ -521,6 +557,102 @@ export default function ProductPage() {
             </div>
           </div>
 
+          {/* Reviews Section */}
+          <div className="mt-16">
+            <h2 className="font-serif text-2xl text-foreground mb-6">
+              Resenas ({reviews.length})
+            </h2>
+
+            {/* Write a Review */}
+            {isAuthenticated && user && (
+              <div className="bg-card border border-border rounded-lg p-6 mb-8">
+                <h3 className="font-medium text-foreground mb-4">Deja tu resena</h3>
+                <div className="flex items-center gap-1 mb-4">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewRating(star)}
+                      className="p-0.5"
+                    >
+                      <Star className={`h-6 w-6 transition-colors ${star <= reviewRating ? "fill-accent text-accent" : "text-muted-foreground hover:text-accent"}`} />
+                    </button>
+                  ))}
+                  <span className="text-sm text-muted-foreground ml-2">{reviewRating}/5</span>
+                </div>
+                <textarea
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="Escribe tu opinion sobre este producto..."
+                  rows={3}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <Button
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                  disabled={reviewSubmitting}
+                  onClick={async () => {
+                    if (!user) return
+                    setReviewSubmitting(true)
+                    try {
+                      const newReview = await reviewsApi.create(
+                        product.id,
+                        { calificacion: reviewRating, comentario: reviewText || undefined },
+                        user.id,
+                        user.nombre,
+                      )
+                      setReviews((prev) => [newReview, ...prev])
+                      setReviewText("")
+                      setReviewRating(5)
+                      // Refresh product to get updated rating
+                      const updated = await inventoryApi.get(product.id)
+                      setProduct(updated)
+                    } catch {
+                      // silently fail
+                    } finally {
+                      setReviewSubmitting(false)
+                    }
+                  }}
+                >
+                  {reviewSubmitting ? "Enviando..." : "Enviar Resena"}
+                </Button>
+              </div>
+            )}
+
+            {/* Review List */}
+            <div className="space-y-4">
+              {reviews.map((review) => (
+                <div key={review.id} className="bg-card border border-border rounded-lg p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+                        <span className="text-xs font-bold text-accent">{review.usuario_nombre.charAt(0).toUpperCase()}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{review.usuario_nombre}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(review.created_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-0.5">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star key={s} className={`h-3.5 w-3.5 ${s <= review.calificacion ? "fill-accent text-accent" : "text-muted-foreground"}`} />
+                      ))}
+                    </div>
+                  </div>
+                  {review.comentario && (
+                    <p className="text-sm text-muted-foreground leading-relaxed">{review.comentario}</p>
+                  )}
+                </div>
+              ))}
+              {reviews.length === 0 && (
+                <p className="text-center text-muted-foreground py-8">
+                  Aun no hay resenas para este producto. {isAuthenticated ? "Se el primero en opinar!" : "Inicia sesion para dejar una resena."}
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Related Products */}
           <div className="mt-20">
             <h2 className="font-serif text-2xl text-foreground mb-8">Productos Relacionados</h2>
@@ -542,7 +674,7 @@ export default function ProductPage() {
                   <h3 className="font-medium text-foreground group-hover:text-primary transition-colors text-sm">
                     {relatedProduct.nombre}
                   </h3>
-                  <p className="text-primary font-medium">${relatedProduct.precio.toFixed(2)}</p>
+                  <p className="text-primary font-medium">${Number(relatedProduct.precio).toFixed(2)}</p>
                 </Link>
               ))}
             </div>

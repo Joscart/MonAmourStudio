@@ -50,6 +50,8 @@ export function ProductsSection() {
                 name={product.nombre}
                 price={product.precio}
                 image={product.imagen_url || "/placeholder.svg"}
+                disponibilidad={product.disponibilidad}
+                maxPorPedido={product.max_por_pedido}
                 onAddToCart={() =>
                   addItem({
                     id: product.id,
@@ -57,6 +59,7 @@ export function ProductsSection() {
                     precio: product.precio,
                     imagen_url: product.imagen_url,
                     sku: product.sku,
+                    max_por_pedido: product.max_por_pedido,
                   })
                 }
               />
