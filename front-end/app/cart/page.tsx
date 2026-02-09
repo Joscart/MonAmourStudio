@@ -7,9 +7,11 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Minus, Plus, X, ShoppingBag, ArrowRight, Truck, Shield } from "lucide-react"
 import { useCart } from "@/contexts/cart-context"
+import { useAuth } from "@/contexts/auth-context"
 
 export default function CartPage() {
   const { items, totalItems, subtotal, removeItem, updateQuantity } = useCart()
+  const { isAuthenticated } = useAuth()
 
   const shipping = subtotal > 100 ? 0 : 9.99
   const total = subtotal + shipping
@@ -152,8 +154,8 @@ export default function CartPage() {
 
                   {/* Checkout Button */}
                   <Button asChild className="w-full mt-6 bg-primary hover:bg-primary/90 text-primary-foreground">
-                    <Link href="/payment">
-                      Proceder al Pago
+                    <Link href={isAuthenticated ? "/payment" : "/login"}>
+                      {isAuthenticated ? "Proceder al Pago" : "Iniciar Sesion para Pagar"}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
                   </Button>

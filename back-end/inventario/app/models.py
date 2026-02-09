@@ -228,6 +228,47 @@ class Tamano(Base):
         return f"<Tamano {self.nombre} {self.ancho_cm}x{self.alto_cm}cm>"
 
 
+# ── Favorito (user bookmarks a product) ────────────────────────────────────────
+
+
+class Favorito(Base):
+    __tablename__ = "favoritos"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    producto_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("productos.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    producto: Mapped["Producto"] = relationship()
+
+    __table_args__ = (
+        # one favorite per user+product pair
+        {"sqlite_autoincrement": True},  # placeholder – real constraint below
+    )
+
+    def __repr__(self) -> str:
+        return f"<Favorito user={self.usuario_id} product={self.producto_id}>"
+
+
+# Add unique constraint via event (cleaner than __table_args__ with mixed positional)
+from sqlalchemy import UniqueConstraint  # noqa: E402
+Favorito.__table__.append_constraint(
+    UniqueConstraint("usuario_id", "producto_id", name="uq_favorito_usuario_producto")
+)
+
+
 # ── Regla de Disponibilidad ───────────────────────────────────────────────────
 
 

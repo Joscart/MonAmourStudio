@@ -178,6 +178,18 @@ class ResenaResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Favorito Schemas ──────────────────────────────────────────────────────────
+
+
+class FavoritoResponse(BaseModel):
+    id: uuid.UUID
+    usuario_id: uuid.UUID
+    producto_id: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── ReglaDisponibilidad Schemas ───────────────────────────────────────────────
 
 

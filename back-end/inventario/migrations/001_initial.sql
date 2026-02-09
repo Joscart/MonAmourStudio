@@ -104,3 +104,16 @@ CREATE TABLE IF NOT EXISTS reglas_disponibilidad (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reglas_producto_id ON reglas_disponibilidad (producto_id);
+
+-- ── favoritos (user bookmarks) ───────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS favoritos (
+    id              UUID            PRIMARY KEY DEFAULT uuid_generate_v4(),
+    usuario_id      UUID            NOT NULL,
+    producto_id     UUID            NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    UNIQUE(usuario_id, producto_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_favoritos_usuario ON favoritos (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_favoritos_producto ON favoritos (producto_id);

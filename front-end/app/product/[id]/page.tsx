@@ -5,7 +5,7 @@ import React from "react"
 import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -28,7 +28,7 @@ import {
   Shield,
   Gift,
 } from "lucide-react"
-import { inventoryApi, reviewsApi } from "@/lib/api"
+import { inventoryApi, reviewsApi, favoritesApi } from "@/lib/api"
 import { useCart } from "@/contexts/cart-context"
 import { useAuth } from "@/contexts/auth-context"
 import type { ProductoResponse, ResenaResponse } from "@/lib/types"
@@ -57,6 +57,7 @@ export default function ProductPage() {
   const previewContainerRef = useRef<HTMLDivElement>(null)
   const dragStartRef = useRef({ x: 0, y: 0 })
 
+  const router = useRouter()
   const { addItem } = useCart()
   const { user, isAuthenticated } = useAuth()
 
@@ -73,6 +74,21 @@ export default function ProductPage() {
       .catch(() => setProduct(null))
       .finally(() => setIsLoading(false))
   }, [productId])
+
+  // Load favorite status
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      favoritesApi.listIds(user.id).then((ids) => setIsLiked(ids.includes(productId))).catch(() => {})
+    }
+  }, [isAuthenticated, user, productId])
+
+  const handleToggleFavorite = async () => {
+    if (!isAuthenticated || !user) { router.push("/login"); return }
+    try {
+      const res = await favoritesApi.toggle(productId, user.id)
+      setIsLiked(res.favorited)
+    } catch {}
+  }
 
   const selectedSizeData = product?.tamanos?.[selectedSizeIdx]
   const sizeExtra = selectedSizeData ? Number(selectedSizeData.precio_adicional) : 0
@@ -496,7 +512,7 @@ export default function ProductPage() {
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setIsLiked(!isLiked)}
+                  onClick={handleToggleFavorite}
                   className={`h-12 w-12 flex items-center justify-center border rounded-lg transition-colors ${
                     isLiked 
                       ? "border-primary bg-primary/10 text-primary" 
@@ -564,7 +580,7 @@ export default function ProductPage() {
             </h2>
 
             {/* Write a Review */}
-            {isAuthenticated && user && (
+            {isAuthenticated && user ? (
               <div className="bg-card border border-border rounded-lg p-6 mb-8">
                 <h3 className="font-medium text-foreground mb-4">Deja tu resena</h3>
                 <div className="flex items-center gap-1 mb-4">
@@ -614,6 +630,13 @@ export default function ProductPage() {
                   }}
                 >
                   {reviewSubmitting ? "Enviando..." : "Enviar Resena"}
+                </Button>
+              </div>
+            ) : (
+              <div className="bg-card border border-border rounded-lg p-6 mb-8 text-center">
+                <p className="text-muted-foreground mb-3">Inicia sesion para dejar una resena</p>
+                <Button asChild className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                  <Link href="/login">Iniciar Sesion</Link>
                 </Button>
               </div>
             )}

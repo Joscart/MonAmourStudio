@@ -1,10 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Heart, ShoppingBag } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/contexts/auth-context"
+import { favoritesApi } from "@/lib/api"
 
 interface ProductCardProps {
   id: string
@@ -20,6 +23,7 @@ interface ProductCardProps {
   rating?: number
   totalReviews?: number
   onAddToCart?: () => void
+  favoriteIds?: string[]
 }
 
 export function ProductCard({ 
@@ -36,9 +40,27 @@ export function ProductCard({
   rating,
   totalReviews,
   onAddToCart,
+  favoriteIds,
 }: ProductCardProps) {
+  const router = useRouter()
+  const { user, isAuthenticated } = useAuth()
   const [isLiked, setIsLiked] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+
+  useEffect(() => {
+    if (favoriteIds) {
+      setIsLiked(favoriteIds.includes(id))
+    }
+  }, [favoriteIds, id])
+
+  const handleToggleFavorite = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    if (!isAuthenticated || !user) { router.push("/login"); return }
+    try {
+      const res = await favoritesApi.toggle(id, user.id)
+      setIsLiked(res.favorited)
+    } catch {}
+  }
 
   return (
     <div 
@@ -78,7 +100,7 @@ export function ProductCard({
           {/* Wishlist Button */}
           <button
             type="button"
-            onClick={(e) => { e.preventDefault(); setIsLiked(!isLiked) }}
+            onClick={handleToggleFavorite}
             className="absolute top-3 right-3 p-2 bg-card/80 backdrop-blur-sm rounded-full transition-all hover:bg-card"
             aria-label={isLiked ? "Quitar de favoritos" : "Agregar a favoritos"}
           >

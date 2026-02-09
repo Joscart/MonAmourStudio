@@ -37,7 +37,11 @@ services:
     build:
       context: ../front-end
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_ADMIN_EMAIL: ${ADMIN_EMAIL}
     container_name: frontend
+    environment:
+      NEXT_PUBLIC_ADMIN_EMAIL: ${ADMIN_EMAIL}
     depends_on:
       - usuarios
       - inventario

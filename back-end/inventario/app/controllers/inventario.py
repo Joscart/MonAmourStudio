@@ -11,6 +11,7 @@ from app.schemas import (
     DescuentoResponse,
     EmpaqueCreate,
     EmpaqueResponse,
+    FavoritoResponse,
     GarantiaCreate,
     GarantiaResponse,
     ProductoCreate,
@@ -360,3 +361,54 @@ async def delete_resena(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resena no encontrada",
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Favoritos (user bookmarks)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/favoritos/toggle")
+async def toggle_favorito(
+    producto_id: uuid.UUID = Query(...),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle a product as favorite for the user. Returns {favorited: bool}."""
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Se requiere autenticacion")
+    try:
+        usuario_id = uuid.UUID(x_user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-User-Id invalido")
+    return await service.toggle_favorito(db, usuario_id, producto_id)
+
+
+@router.get("/favoritos/me", response_model=List[FavoritoResponse])
+async def list_favoritos(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all favorites for the authenticated user."""
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Se requiere autenticacion")
+    try:
+        usuario_id = uuid.UUID(x_user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-User-Id invalido")
+    return await service.list_favoritos(db, usuario_id)
+
+
+@router.get("/favoritos/ids", response_model=List[uuid.UUID])
+async def list_favorito_ids(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return list of product IDs that user has favorited."""
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Se requiere autenticacion")
+    try:
+        usuario_id = uuid.UUID(x_user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-User-Id invalido")
+    return await service.list_favorito_ids(db, usuario_id)

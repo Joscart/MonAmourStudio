@@ -6,7 +6,7 @@ from sqlalchemy import delete as sa_delete, func, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.models import Descuento, Empaque, Garantia, Producto, Resena, Tamano, TipoProducto
+from app.models import Descuento, Empaque, Favorito, Garantia, Producto, Resena, Tamano, TipoProducto
 
 
 class InventarioRepository:
@@ -323,3 +323,63 @@ class DescuentoRepository:
         )
         await db.flush()
         return result.rowcount > 0
+
+
+# ── Favoritos ──────────────────────────────────────────────────────────────────
+
+
+class FavoritoRepository:
+    async def create(self, db: AsyncSession, favorito: Favorito) -> Favorito:
+        db.add(favorito)
+        await db.flush()
+        await db.refresh(favorito)
+        return favorito
+
+    async def list_by_user(
+        self, db: AsyncSession, usuario_id: uuid.UUID
+    ) -> list[Favorito]:
+        result = await db.execute(
+            select(Favorito)
+            .options(joinedload(Favorito.producto))
+            .where(Favorito.usuario_id == usuario_id)
+            .order_by(Favorito.created_at.desc())
+        )
+        return list(result.unique().scalars().all())
+
+    async def get_by_user_and_product(
+        self, db: AsyncSession, usuario_id: uuid.UUID, producto_id: uuid.UUID
+    ) -> Optional[Favorito]:
+        result = await db.execute(
+            select(Favorito).where(
+                Favorito.usuario_id == usuario_id,
+                Favorito.producto_id == producto_id,
+            )
+        )
+        return result.scalars().first()
+
+    async def delete(self, db: AsyncSession, favorito_id: uuid.UUID) -> bool:
+        result = await db.execute(
+            sa_delete(Favorito).where(Favorito.id == favorito_id)
+        )
+        await db.flush()
+        return result.rowcount > 0
+
+    async def delete_by_user_and_product(
+        self, db: AsyncSession, usuario_id: uuid.UUID, producto_id: uuid.UUID
+    ) -> bool:
+        result = await db.execute(
+            sa_delete(Favorito).where(
+                Favorito.usuario_id == usuario_id,
+                Favorito.producto_id == producto_id,
+            )
+        )
+        await db.flush()
+        return result.rowcount > 0
+
+    async def list_product_ids_for_user(
+        self, db: AsyncSession, usuario_id: uuid.UUID
+    ) -> list[uuid.UUID]:
+        result = await db.execute(
+            select(Favorito.producto_id).where(Favorito.usuario_id == usuario_id)
+        )
+        return list(result.scalars().all())

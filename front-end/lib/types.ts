@@ -18,6 +18,12 @@ export interface LoginRequest {
 export interface UsuarioUpdate {
   nombre?: string
   email?: string
+  telefono?: string
+}
+
+export interface PasswordChange {
+  current_password: string
+  new_password: string
 }
 
 export interface UsuarioResponse {
@@ -25,6 +31,7 @@ export interface UsuarioResponse {
   nombre: string
   email: string
   rol: string
+  telefono: string | null
   created_at: string
 }
 

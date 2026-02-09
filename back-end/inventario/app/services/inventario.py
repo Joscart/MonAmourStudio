@@ -5,10 +5,11 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Descuento, Empaque, Garantia, Producto, Resena, Tamano, TipoProducto
+from app.models import Descuento, Empaque, Favorito, Garantia, Producto, Resena, Tamano, TipoProducto
 from app.repositories.inventario import (
     DescuentoRepository,
     EmpaqueRepository,
+    FavoritoRepository,
     GarantiaRepository,
     InventarioRepository,
     ResenaRepository,
@@ -18,6 +19,7 @@ from app.repositories.inventario import (
 from app.schemas import (
     DescuentoCreate,
     EmpaqueCreate,
+    FavoritoResponse,
     GarantiaCreate,
     ProductoCreate,
     ProductoResponse,
@@ -60,6 +62,7 @@ class InventarioService:
         self.empaque_repo = EmpaqueRepository()
         self.descuento_repo = DescuentoRepository()
         self.tamano_repo = TamanoRepository()
+        self.favorito_repo = FavoritoRepository()
 
     # ── List ──────────────────────────────────────────────────────────
 
@@ -425,3 +428,30 @@ class InventarioService:
 
     async def delete_tamano(self, db: AsyncSession, tamano_id: uuid.UUID) -> bool:
         return await self.tamano_repo.delete(db, tamano_id)
+
+    # ════════════════════════════════════════════════════════════════
+    #  Favoritos
+    # ════════════════════════════════════════════════════════════════
+
+    async def toggle_favorito(
+        self, db: AsyncSession, usuario_id: uuid.UUID, producto_id: uuid.UUID
+    ) -> dict:
+        """Toggle favorite: add if not present, remove if present. Returns {favorited: bool}."""
+        existing = await self.favorito_repo.get_by_user_and_product(db, usuario_id, producto_id)
+        if existing:
+            await self.favorito_repo.delete(db, existing.id)
+            return {"favorited": False}
+        fav = Favorito(usuario_id=usuario_id, producto_id=producto_id)
+        await self.favorito_repo.create(db, fav)
+        return {"favorited": True}
+
+    async def list_favoritos(
+        self, db: AsyncSession, usuario_id: uuid.UUID
+    ) -> list[FavoritoResponse]:
+        items = await self.favorito_repo.list_by_user(db, usuario_id)
+        return [FavoritoResponse.model_validate(f) for f in items]
+
+    async def list_favorito_ids(
+        self, db: AsyncSession, usuario_id: uuid.UUID
+    ) -> list[uuid.UUID]:
+        return await self.favorito_repo.list_product_ids_for_user(db, usuario_id)

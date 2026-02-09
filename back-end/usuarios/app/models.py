@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -26,12 +26,81 @@ class Usuario(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     sesiones: Mapped[list["Sesion"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+    direcciones: Mapped[list["Direccion"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+    metodos_pago: Mapped[list["MetodoPago"]] = relationship(
         back_populates="usuario", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
         return f"<Usuario {self.email}>"
+
+
+# ── Dirección ─────────────────────────────────────────────────────────────────
+
+
+class Direccion(Base):
+    __tablename__ = "direcciones"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
+    )
+    etiqueta: Mapped[str] = mapped_column(String(60), nullable=False, default="Casa")
+    linea1: Mapped[str] = mapped_column(String(255), nullable=False)
+    linea2: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ciudad: Mapped[str] = mapped_column(String(120), nullable=False)
+    provincia: Mapped[str] = mapped_column(String(120), nullable=False)
+    codigo_postal: Mapped[str] = mapped_column(String(20), nullable=False)
+    pais: Mapped[str] = mapped_column(String(60), nullable=False, default="Ecuador")
+    es_principal: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="direcciones")
+
+    def __repr__(self) -> str:
+        return f"<Direccion {self.etiqueta} user={self.usuario_id}>"
+
+
+# ── Método de Pago ────────────────────────────────────────────────────────────
+
+
+class MetodoPago(Base):
+    __tablename__ = "metodos_pago"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
+    )
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False, default="Visa")
+    ultimos_4: Mapped[str] = mapped_column(String(4), nullable=False)
+    titular: Mapped[str] = mapped_column(String(120), nullable=False)
+    expiracion: Mapped[str] = mapped_column(String(7), nullable=False)  # MM/YYYY
+    es_principal: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="metodos_pago")
+
+    def __repr__(self) -> str:
+        return f"<MetodoPago {self.tipo} *{self.ultimos_4} user={self.usuario_id}>"
 
 
 class Sesion(Base):

@@ -8,9 +8,16 @@ from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Usuario
-from app.repositories.usuarios import UsuarioRepository
-from app.schemas import UsuarioCreate, UsuarioUpdate
+from app.models import Direccion, MetodoPago, Usuario
+from app.repositories.usuarios import DireccionRepository, MetodoPagoRepository, UsuarioRepository
+from app.schemas import (
+    DireccionCreate,
+    DireccionUpdate,
+    MetodoPagoCreate,
+    PasswordChange,
+    UsuarioCreate,
+    UsuarioUpdate,
+)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -20,6 +27,8 @@ class UsuarioService:
 
     def __init__(self) -> None:
         self.repo = UsuarioRepository()
+        self.dir_repo = DireccionRepository()
+        self.pago_repo = MetodoPagoRepository()
 
     # ── helpers ───────────────────────────────────────────────────────
 
@@ -43,10 +52,14 @@ class UsuarioService:
         }
         return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
+    @staticmethod
+    def is_default_admin(email: str) -> bool:
+        """Check if this email is the env-var default admin."""
+        return bool(settings.ADMIN_EMAIL) and email.lower() == settings.ADMIN_EMAIL.lower()
+
     # ── public API ────────────────────────────────────────────────────
 
     async def register(self, db: AsyncSession, data: UsuarioCreate) -> Usuario:
-        """Register a new user, publish Kafka event, return the user."""
         existing = await self.repo.get_by_email(db, data.email)
         if existing:
             raise HTTPException(
@@ -54,9 +67,8 @@ class UsuarioService:
                 detail="El correo ya está registrado",
             )
 
-        # Auto-promote to admin if email matches ADMIN_EMAIL
         rol = "cliente"
-        if settings.ADMIN_EMAIL and data.email.lower() == settings.ADMIN_EMAIL.lower():
+        if self.is_default_admin(data.email):
             rol = "admin"
 
         usuario = Usuario(
@@ -67,10 +79,8 @@ class UsuarioService:
         )
         usuario = await self.repo.create(db, usuario)
 
-        # publish domain event (best-effort; import here to avoid circular dep)
         try:
             from app.events.producer import kafka_producer
-
             if kafka_producer is not None:
                 await kafka_producer.publish(
                     topic="usuarios",
@@ -83,12 +93,11 @@ class UsuarioService:
                     },
                 )
         except Exception:
-            pass  # don't fail registration if Kafka is unavailable
+            pass
 
         return usuario
 
     async def authenticate(self, db: AsyncSession, email: str, password: str) -> str:
-        """Verify credentials and return a JWT token."""
         user = await self.repo.get_by_email(db, email)
         if user is None or not self._verify_password(password, user.password_hash):
             raise HTTPException(
@@ -108,13 +117,126 @@ class UsuarioService:
             return await self.repo.get_by_id(db, user_id)
         return await self.repo.update(db, user_id, update_data)
 
+    async def change_password(
+        self, db: AsyncSession, user_id: uuid.UUID, data: PasswordChange
+    ) -> bool:
+        user = await self.repo.get_by_id(db, user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        if not self._verify_password(data.current_password, user.password_hash):
+            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+        new_hash = self._hash_password(data.new_password)
+        await self.repo.update(db, user_id, {"password_hash": new_hash})
+        return True
+
+    async def delete_own_account(self, db: AsyncSession, user_id: uuid.UUID) -> bool:
+        user = await self.repo.get_by_id(db, user_id)
+        if user is None:
+            return False
+        if self.is_default_admin(user.email):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="La cuenta de administrador principal no puede eliminarse",
+            )
+        return await self.repo.delete(db, user_id)
+
     async def list_users(self, db: AsyncSession) -> list[Usuario]:
         return await self.repo.list_all(db)
 
     async def update_role(
         self, db: AsyncSession, user_id: uuid.UUID, new_role: str
     ) -> Optional[Usuario]:
+        user = await self.repo.get_by_id(db, user_id)
+        if user is None:
+            return None
+        if self.is_default_admin(user.email) and new_role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="El administrador principal no puede cambiar de rol",
+            )
         return await self.repo.update(db, user_id, {"rol": new_role})
 
     async def delete_user(self, db: AsyncSession, user_id: uuid.UUID) -> bool:
+        user = await self.repo.get_by_id(db, user_id)
+        if user and self.is_default_admin(user.email):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="La cuenta de administrador principal no puede eliminarse",
+            )
         return await self.repo.delete(db, user_id)
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Direcciones
+    # ══════════════════════════════════════════════════════════════════
+
+    async def list_direcciones(self, db: AsyncSession, user_id: uuid.UUID) -> list[Direccion]:
+        return await self.dir_repo.list_by_user(db, user_id)
+
+    async def create_direccion(
+        self, db: AsyncSession, user_id: uuid.UUID, data: DireccionCreate
+    ) -> Direccion:
+        if data.es_principal:
+            await self.dir_repo.clear_principal(db, user_id)
+        d = Direccion(
+            usuario_id=user_id,
+            etiqueta=data.etiqueta,
+            linea1=data.linea1,
+            linea2=data.linea2,
+            ciudad=data.ciudad,
+            provincia=data.provincia,
+            codigo_postal=data.codigo_postal,
+            pais=data.pais,
+            es_principal=data.es_principal,
+        )
+        return await self.dir_repo.create(db, d)
+
+    async def update_direccion(
+        self, db: AsyncSession, user_id: uuid.UUID, direccion_id: uuid.UUID, data: DireccionUpdate
+    ) -> Optional[Direccion]:
+        existing = await self.dir_repo.get_by_id(db, direccion_id)
+        if existing is None or existing.usuario_id != user_id:
+            return None
+        update_data = data.model_dump(exclude_unset=True)
+        if not update_data:
+            return existing
+        if update_data.get("es_principal"):
+            await self.dir_repo.clear_principal(db, user_id)
+        return await self.dir_repo.update(db, direccion_id, update_data)
+
+    async def delete_direccion(
+        self, db: AsyncSession, user_id: uuid.UUID, direccion_id: uuid.UUID
+    ) -> bool:
+        existing = await self.dir_repo.get_by_id(db, direccion_id)
+        if existing is None or existing.usuario_id != user_id:
+            return False
+        return await self.dir_repo.delete(db, direccion_id)
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Métodos de Pago
+    # ══════════════════════════════════════════════════════════════════
+
+    async def list_metodos_pago(self, db: AsyncSession, user_id: uuid.UUID) -> list[MetodoPago]:
+        return await self.pago_repo.list_by_user(db, user_id)
+
+    async def create_metodo_pago(
+        self, db: AsyncSession, user_id: uuid.UUID, data: MetodoPagoCreate
+    ) -> MetodoPago:
+        if data.es_principal:
+            await self.pago_repo.clear_principal(db, user_id)
+        m = MetodoPago(
+            usuario_id=user_id,
+            tipo=data.tipo,
+            ultimos_4=data.ultimos_4,
+            titular=data.titular,
+            expiracion=data.expiracion,
+            es_principal=data.es_principal,
+        )
+        return await self.pago_repo.create(db, m)
+
+    async def delete_metodo_pago(
+        self, db: AsyncSession, user_id: uuid.UUID, metodo_id: uuid.UUID
+    ) -> bool:
+        existing = await self.pago_repo.get_by_id(db, metodo_id)
+        if existing is None or existing.usuario_id != user_id:
+            return False
+        return await self.pago_repo.delete(db, metodo_id)

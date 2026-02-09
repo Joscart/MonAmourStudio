@@ -15,6 +15,13 @@ import type {
   UsuarioUpdate,
   UsuarioResponse,
   TokenResponse,
+  PasswordChange,
+  DireccionCreate,
+  DireccionUpdate,
+  DireccionResponse,
+  MetodoPagoCreate,
+  MetodoPagoResponse,
+  FavoritoResponse,
   ProductoResponse,
   ProductoCreate,
   ProductoUpdate,
@@ -125,6 +132,51 @@ export const usersApi = {
       method: "PATCH",
       body: JSON.stringify({ rol }),
     })
+  },
+
+  changePassword(data: PasswordChange) {
+    return request<void>("/api/users/me/change-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteOwnAccount() {
+    return request<void>("/api/users/me", { method: "DELETE" })
+  },
+
+  // ── Direcciones ────────────────────────
+  listDirecciones() {
+    return request<DireccionResponse[]>("/api/users/me/direcciones")
+  },
+  createDireccion(data: DireccionCreate) {
+    return request<DireccionResponse>("/api/users/me/direcciones", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+  updateDireccion(id: string, data: DireccionUpdate) {
+    return request<DireccionResponse>(`/api/users/me/direcciones/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  },
+  deleteDireccion(id: string) {
+    return request<void>(`/api/users/me/direcciones/${id}`, { method: "DELETE" })
+  },
+
+  // ── Métodos de pago ────────────────────
+  listMetodosPago() {
+    return request<MetodoPagoResponse[]>("/api/users/me/metodos-pago")
+  },
+  createMetodoPago(data: MetodoPagoCreate) {
+    return request<MetodoPagoResponse>("/api/users/me/metodos-pago", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+  deleteMetodoPago(id: string) {
+    return request<void>(`/api/users/me/metodos-pago/${id}`, { method: "DELETE" })
   },
 }
 
@@ -322,6 +374,29 @@ export const reviewsApi = {
   delete(productId: string, resenaId: string) {
     return request<void>(`/api/inventory/${productId}/resenas/${resenaId}`, {
       method: "DELETE",
+    })
+  },
+}
+
+/* ── Favoritos ───────────────────────────────────────────────────── */
+
+export const favoritesApi = {
+  toggle(productId: string, userId: string) {
+    return request<{ favorited: boolean }>(`/api/inventory/favoritos/toggle?producto_id=${productId}`, {
+      method: "POST",
+      headers: { "X-User-Id": userId },
+    })
+  },
+
+  listIds(userId: string) {
+    return request<string[]>("/api/inventory/favoritos/ids", {
+      headers: { "X-User-Id": userId },
+    })
+  },
+
+  list(userId: string) {
+    return request<FavoritoResponse[]>("/api/inventory/favoritos/me", {
+      headers: { "X-User-Id": userId },
     })
   },
 }

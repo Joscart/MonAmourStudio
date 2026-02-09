@@ -32,6 +32,7 @@ import {
   Loader2,
   Shield,
   ShieldCheck,
+  Lock,
   X as XIcon,
   Save,
   AlertTriangle,
@@ -62,6 +63,8 @@ export default function AdminDashboard() {
   const [customers, setCustomers] = useState<UsuarioResponse[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<UsuarioResponse | null>(null)
   const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
+  const [customerSearch, setCustomerSearch] = useState("")
+  const [customerError, setCustomerError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   // ── Product CRUD state ─────────────────────────────────────
@@ -313,7 +316,17 @@ export default function AdminDashboard() {
       p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()),
   )
 
+  const defaultAdminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase()
+  const isDefaultAdmin = (email: string) => defaultAdminEmail !== "" && email.toLowerCase() === defaultAdminEmail
+
+  const filteredCustomers = customers.filter(
+    (c) =>
+      c.nombre.toLowerCase().includes(customerSearch.toLowerCase()) ||
+      c.email.toLowerCase().includes(customerSearch.toLowerCase()),
+  )
+
   const handleRoleChange = async (userId: string, newRole: string) => {
+    setCustomerError(null)
     setRoleUpdating(userId)
     try {
       const updated = await usersApi.updateRole(userId, newRole)
@@ -323,21 +336,24 @@ export default function AdminDashboard() {
       if (selectedCustomer?.id === userId) {
         setSelectedCustomer((prev) => (prev ? { ...prev, rol: updated.rol } : prev))
       }
-    } catch {
-      // silently fail
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al cambiar rol"
+      setCustomerError(msg.includes("403") || msg.includes("default") ? "No se puede cambiar el rol del administrador por defecto" : msg)
     } finally {
       setRoleUpdating(null)
     }
   }
 
   const handleDeleteUser = async (userId: string) => {
+    setCustomerError(null)
     if (!confirm("¿Seguro que deseas eliminar este usuario? Esta acción es irreversible.")) return
     try {
       await usersApi.deleteUser(userId)
       setCustomers((prev) => prev.filter((c) => c.id !== userId))
       if (selectedCustomer?.id === userId) setSelectedCustomer(null)
-    } catch {
-      // silently fail
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al eliminar usuario"
+      setCustomerError(msg.includes("403") || msg.includes("default") ? "No se puede eliminar al administrador por defecto" : msg)
     }
   }
   const pendingOrders = orders.filter((o) =>
@@ -1084,10 +1100,16 @@ export default function AdminDashboard() {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         placeholder="Buscar cliente..."
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
                         className="pl-10 bg-card border-border"
                       />
                     </div>
                   </div>
+
+                  {customerError && (
+                    <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive">{customerError}</div>
+                  )}
 
                   <div className="grid lg:grid-cols-3 gap-6">
                     {/* User Table */}
@@ -1103,18 +1125,30 @@ export default function AdminDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
-                            {customers.map((customer) => (
+                            {filteredCustomers.map((customer) => {
+                              const locked = isDefaultAdmin(customer.email)
+                              return (
                               <tr
                                 key={customer.id}
                                 className={`hover:bg-secondary/30 transition-colors cursor-pointer ${selectedCustomer?.id === customer.id ? "bg-secondary/40" : ""}`}
                                 onClick={() => setSelectedCustomer(customer)}
                               >
                                 <td className="px-5 py-4">
-                                  <p className="text-sm font-medium text-foreground">{customer.nombre}</p>
-                                  <p className="text-xs text-muted-foreground">{customer.email}</p>
+                                  <div className="flex items-center gap-2">
+                                    <div>
+                                      <p className="text-sm font-medium text-foreground">{customer.nombre}</p>
+                                      <p className="text-xs text-muted-foreground">{customer.email}</p>
+                                    </div>
+                                    {locked && <Lock className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" title="Administrador por defecto" />}
+                                  </div>
                                 </td>
                                 <td className="px-5 py-4">
                                   <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                    {locked ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full bg-purple-100 text-purple-700">
+                                        <Lock className="h-3 w-3" /> admin
+                                      </span>
+                                    ) : (
                                     <select
                                       value={customer.rol}
                                       onChange={(e) => handleRoleChange(customer.id, e.target.value)}
@@ -1131,7 +1165,8 @@ export default function AdminDashboard() {
                                       <option value="vendedor">vendedor</option>
                                       <option value="admin">admin</option>
                                     </select>
-                                    <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none" />
+                                    )}
+                                    {!locked && <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none" />}
                                   </div>
                                 </td>
                                 <td className="px-5 py-4 text-sm text-muted-foreground">{formatDate(customer.created_at)}</td>
@@ -1145,6 +1180,7 @@ export default function AdminDashboard() {
                                     >
                                       <Eye className="h-4 w-4" />
                                     </Button>
+                                    {!locked && (
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -1153,14 +1189,16 @@ export default function AdminDashboard() {
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </Button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
-                            ))}
-                            {customers.length === 0 && (
+                              )
+                            })}
+                            {filteredCustomers.length === 0 && (
                               <tr>
                                 <td colSpan={4} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                                  No hay clientes registrados.
+                                  {customerSearch ? "No se encontraron clientes con esa busqueda." : "No hay clientes registrados."}
                                 </td>
                               </tr>
                             )}
@@ -1200,6 +1238,11 @@ export default function AdminDashboard() {
                             {selectedCustomer.rol === "admin" ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
                             {selectedCustomer.rol}
                           </span>
+                          {isDefaultAdmin(selectedCustomer.email) && (
+                            <span className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                              <Lock className="h-3 w-3" /> Administrador por defecto
+                            </span>
+                          )}
                         </div>
 
                         <div className="space-y-3 text-sm">
@@ -1215,8 +1258,15 @@ export default function AdminDashboard() {
                             <span className="text-muted-foreground">Rol</span>
                             <span className="text-foreground capitalize">{selectedCustomer.rol}</span>
                           </div>
+                          {selectedCustomer.telefono && (
+                          <div className="flex justify-between py-2 border-b border-border">
+                            <span className="text-muted-foreground">Telefono</span>
+                            <span className="text-foreground">{selectedCustomer.telefono}</span>
+                          </div>
+                          )}
                         </div>
 
+                        {!isDefaultAdmin(selectedCustomer.email) && (
                         <div className="mt-6 space-y-2">
                           <label htmlFor="roleSelect" className="text-sm font-medium text-foreground">Cambiar Rol</label>
                           <div className="flex gap-2">
@@ -1233,7 +1283,9 @@ export default function AdminDashboard() {
                             </select>
                           </div>
                         </div>
+                        )}
 
+                        {!isDefaultAdmin(selectedCustomer.email) ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -1243,6 +1295,12 @@ export default function AdminDashboard() {
                           <Trash2 className="h-4 w-4 mr-2" />
                           Eliminar Usuario
                         </Button>
+                        ) : (
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 text-center">
+                          <Lock className="h-4 w-4 mx-auto mb-1" />
+                          Este usuario no puede ser modificado ni eliminado
+                        </div>
+                        )}
                       </div>
                     )}
                   </div>
