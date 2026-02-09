@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = ""
     # ── Google OAuth ──────────────────────────────────────────────
     GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
     # ── JWT ───────────────────────────────────────────────────────────
     JWT_SECRET: str = "super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
