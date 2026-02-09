@@ -304,6 +304,15 @@ async def delete_tamano(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@router.get("/resenas/featured", response_model=List[ResenaResponse])
+async def featured_resenas(
+    limit: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return random 5-star reviews for testimonials section."""
+    return await service.list_featured_resenas(db, limit=limit)
+
+
 @router.get("/{product_id}/resenas", response_model=List[ResenaResponse])
 async def list_resenas(
     product_id: uuid.UUID,

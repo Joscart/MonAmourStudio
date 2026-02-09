@@ -367,12 +367,22 @@ export interface ConfiguracionTiendaUpdate {
   instagram_url?: string | null
   tiktok_url?: string | null
   whatsapp_url?: string | null
+  facebook_url?: string | null
   color_primary_h?: number
   color_primary_s?: number
   color_primary_l?: number
   color_accent_h?: number
   color_accent_s?: number
   color_accent_l?: number
+  color_secondary_h?: number
+  color_secondary_s?: number
+  color_secondary_l?: number
+  atenuacion?: number
+  home_image_url?: string | null
+  login_image_url?: string | null
+  register_image_url?: string | null
+  about_image_url?: string | null
+  footer_light_text?: boolean
 }
 
 export interface ConfiguracionTiendaResponse {
@@ -387,12 +397,22 @@ export interface ConfiguracionTiendaResponse {
   instagram_url: string | null
   tiktok_url: string | null
   whatsapp_url: string | null
+  facebook_url: string | null
   color_primary_h: number
   color_primary_s: number
   color_primary_l: number
   color_accent_h: number
   color_accent_s: number
   color_accent_l: number
+  color_secondary_h: number
+  color_secondary_s: number
+  color_secondary_l: number
+  atenuacion: number
+  home_image_url: string | null
+  login_image_url: string | null
+  register_image_url: string | null
+  about_image_url: string | null
+  footer_light_text: boolean
   created_at?: string | null
   updated_at?: string | null
 }

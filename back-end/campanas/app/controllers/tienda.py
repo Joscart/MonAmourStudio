@@ -60,3 +60,43 @@ async def upload_logo(
         db, ConfiguracionTiendaUpdate(logo_url=logo_url)
     )
     return updated
+
+
+@router.post("/image/{slot}", response_model=ConfiguracionTiendaResponse)
+async def upload_page_image(
+    slot: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a page image. slot = home | login | register."""
+    allowed_slots = {"home": "home_image_url", "login": "login_image_url", "register": "register_image_url", "about": "about_image_url"}
+    field = allowed_slots.get(slot)
+    if field is None:
+        raise HTTPException(status_code=400, detail=f"Slot invalido: {slot}. Usa: home, login, register")
+
+    contents = await file.read()
+    content_type = file.content_type or "application/octet-stream"
+
+    try:
+        object_name = upload_file(contents, content_type, prefix=f"pages/{slot}")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    url = get_public_url(object_name)
+
+    # Delete old image if exists
+    config = await service.get_config(db)
+    if config:
+        old_url = getattr(config, field, None)
+        if old_url:
+            from app.config import settings as _s
+            bucket_prefix = f"/storage/{_s.MINIO_BUCKET}/"
+            if bucket_prefix in old_url:
+                old_key = old_url.split(bucket_prefix, 1)[-1]
+                if old_key:
+                    delete_file(old_key)
+
+    updated = await service.update_config(
+        db, ConfiguracionTiendaUpdate(**{field: url})
+    )
+    return updated

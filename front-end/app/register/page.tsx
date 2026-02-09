@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Eye, EyeOff, ArrowLeft, Check, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { useStoreConfig } from "@/contexts/store-config-context"
 import { ApiError } from "@/lib/api"
 
 declare global {
@@ -30,6 +31,7 @@ declare global {
 export default function RegisterPage() {
   const router = useRouter()
   const { register, loginWithGoogle, isAuthenticated, isLoading: authLoading } = useAuth()
+  const { config: storeConfig } = useStoreConfig()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -128,7 +130,7 @@ export default function RegisterPage() {
       {/* Left Side - Image */}
       <div className="hidden lg:flex lg:w-1/2 relative">
         <Image
-          src="/images/frame-2.jpg"
+          src={storeConfig.register_image_url || "/images/frame-2.jpg"}
           alt="Mon Amour Studio"
           fill
           className="object-cover"

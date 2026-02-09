@@ -45,6 +45,9 @@ import {
   MessageCircle,
   Phone,
   Mail,
+  Facebook,
+  ImageIcon,
+  Sliders,
 } from "lucide-react"
 import { useStoreConfig } from "@/contexts/store-config-context"
 
@@ -157,10 +160,13 @@ export default function AdminDashboard() {
     instagram_url: "",
     tiktok_url: "",
     whatsapp_url: "",
+    facebook_url: "",
   })
   const [storeColorForm, setStoreColorForm] = useState({
     primaryColor: "#d4748b",
     accentColor: "#d4a017",
+    secondaryColor: "#3b82f6",
+    atenuacion: 10,
   })
   const [storeSaving, setStoreSaving] = useState(false)
   const [storeError, setStoreError] = useState<string | null>(null)
@@ -169,6 +175,16 @@ export default function AdminDashboard() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
+  const homeImgRef = useRef<HTMLInputElement>(null)
+  const loginImgRef = useRef<HTMLInputElement>(null)
+  const registerImgRef = useRef<HTMLInputElement>(null)
+  const aboutImgRef = useRef<HTMLInputElement>(null)
+  const [homeImgPreview, setHomeImgPreview] = useState<string | null>(null)
+  const [loginImgPreview, setLoginImgPreview] = useState<string | null>(null)
+  const [registerImgPreview, setRegisterImgPreview] = useState<string | null>(null)
+  const [aboutImgPreview, setAboutImgPreview] = useState<string | null>(null)
+  const [imgUploading, setImgUploading] = useState<string | null>(null)
+  const [footerLightText, setFooterLightText] = useState(true)
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -211,12 +227,20 @@ export default function AdminDashboard() {
       instagram_url: storeConfig.instagram_url ?? "",
       tiktok_url: storeConfig.tiktok_url ?? "",
       whatsapp_url: storeConfig.whatsapp_url ?? "",
+      facebook_url: storeConfig.facebook_url ?? "",
     })
     setStoreColorForm({
       primaryColor: hslToHex(storeConfig.color_primary_h, storeConfig.color_primary_s, storeConfig.color_primary_l),
       accentColor: hslToHex(storeConfig.color_accent_h, storeConfig.color_accent_s, storeConfig.color_accent_l),
+      secondaryColor: hslToHex(storeConfig.color_secondary_h, storeConfig.color_secondary_s, storeConfig.color_secondary_l),
+      atenuacion: storeConfig.atenuacion,
     })
     setLogoPreview(storeConfig.logo_url ?? null)
+    setHomeImgPreview(storeConfig.home_image_url ?? null)
+    setLoginImgPreview(storeConfig.login_image_url ?? null)
+    setRegisterImgPreview(storeConfig.register_image_url ?? null)
+    setAboutImgPreview(storeConfig.about_image_url ?? null)
+    setFooterLightText(storeConfig.footer_light_text ?? true)
   }, [storeConfig])
 
   const getStatusColor = (status: string) => {
@@ -1644,49 +1668,66 @@ export default function AdminDashboard() {
                     <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
                       <Upload className="h-4 w-4" /> Logo de la Empresa
                     </h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Sube un logo en PNG, SVG, JPG o WebP. Se actualizara en toda la pagina.
-                    </p>
-
-                    <input
-                      ref={logoInputRef}
-                      type="file"
-                      accept="image/png,image/svg+xml,image/jpeg,image/webp"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0]
-                        if (!file) return
-                        setLogoUploading(true)
-                        setStoreError(null)
-                        try {
-                          const reader = new FileReader()
-                          reader.onload = (ev) => setLogoPreview(ev.target?.result as string)
-                          reader.readAsDataURL(file)
-                          await storeConfigApi.uploadLogo(file)
-                          await refreshStoreConfig()
-                        } catch (err: unknown) {
-                          setStoreError(err instanceof Error ? err.message : "Error al subir logo")
-                        } finally {
-                          setLogoUploading(false)
-                          if (logoInputRef.current) logoInputRef.current.value = ""
-                        }
-                      }}
-                    />
-
+                    <input ref={logoInputRef} type="file" accept="image/png,image/svg+xml,image/jpeg,image/webp" className="hidden" onChange={async (e) => {
+                      const file = e.target.files?.[0]; if (!file) return
+                      setLogoUploading(true); setStoreError(null)
+                      try {
+                        const reader = new FileReader(); reader.onload = (ev) => setLogoPreview(ev.target?.result as string); reader.readAsDataURL(file)
+                        await storeConfigApi.uploadLogo(file); await refreshStoreConfig()
+                      } catch (err: unknown) { setStoreError(err instanceof Error ? err.message : "Error al subir logo") }
+                      finally { setLogoUploading(false); if (logoInputRef.current) logoInputRef.current.value = "" }
+                    }} />
                     <div className="flex items-center gap-6">
                       <div className="w-24 h-24 border-2 border-dashed border-border rounded-lg flex items-center justify-center overflow-hidden bg-secondary/30">
-                        {logoPreview ? (
-                          <Image src={logoPreview} alt="Logo" width={96} height={96} className="object-contain w-full h-full" />
-                        ) : (
-                          <Upload className="h-8 w-8 text-muted-foreground" />
-                        )}
+                        {logoPreview ? <Image src={logoPreview} alt="Logo" width={96} height={96} className="object-contain w-full h-full" /> : <Upload className="h-8 w-8 text-muted-foreground" />}
                       </div>
                       <div className="space-y-2">
                         <Button variant="outline" size="sm" className="bg-transparent" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}>
                           {logoUploading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Subiendo...</> : "Cambiar Logo"}
                         </Button>
-                        <p className="text-xs text-muted-foreground">Si no hay logo, se usa el por defecto.</p>
+                        <p className="text-xs text-muted-foreground">PNG, SVG, JPG o WebP. Si no hay logo se usa el por defecto.</p>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Page Images Upload */}
+                  <div className="bg-card rounded-lg border border-border p-6">
+                    <h3 className="font-medium text-foreground mb-4 flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4" /> Imagenes de Pagina
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">Sube imagenes para la pagina principal, login, registro y quienes somos.</p>
+                    {/* Hidden inputs */}
+                    {(["home", "login", "register", "about"] as const).map((slot) => {
+                      const refMap = { home: homeImgRef, login: loginImgRef, register: registerImgRef, about: aboutImgRef }
+                      const previewMap = { home: homeImgPreview, login: loginImgPreview, register: registerImgPreview, about: aboutImgPreview }
+                      const setPreviewMap = { home: setHomeImgPreview, login: setLoginImgPreview, register: setRegisterImgPreview, about: setAboutImgPreview }
+                      return <input key={slot} ref={refMap[slot]} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0]; if (!file) return
+                        setImgUploading(slot); setStoreError(null)
+                        try {
+                          const reader = new FileReader(); reader.onload = (ev) => setPreviewMap[slot](ev.target?.result as string); reader.readAsDataURL(file)
+                          await storeConfigApi.uploadPageImage(slot, file); await refreshStoreConfig()
+                        } catch (err: unknown) { setStoreError(err instanceof Error ? err.message : `Error al subir imagen ${slot}`) }
+                        finally { setImgUploading(null); if (refMap[slot].current) refMap[slot].current!.value = "" }
+                      }} />
+                    })}
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {([
+                        { slot: "home" as const, label: "Home (Hero)", ref: homeImgRef, preview: homeImgPreview },
+                        { slot: "login" as const, label: "Login", ref: loginImgRef, preview: loginImgPreview },
+                        { slot: "register" as const, label: "Registro", ref: registerImgRef, preview: registerImgPreview },
+                        { slot: "about" as const, label: "Quienes Somos", ref: aboutImgRef, preview: aboutImgPreview },
+                      ]).map(({ slot, label, ref, preview }) => (
+                        <div key={slot} className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">{label}</label>
+                          <div className="aspect-video border-2 border-dashed border-border rounded-lg flex items-center justify-center overflow-hidden bg-secondary/30 cursor-pointer hover:border-primary/50 transition-colors" onClick={() => ref.current?.click()}>
+                            {preview ? <Image src={preview} alt={label} width={320} height={180} className="object-cover w-full h-full" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
+                          </div>
+                          <Button variant="outline" size="sm" className="w-full bg-transparent" onClick={() => ref.current?.click()} disabled={imgUploading === slot}>
+                            {imgUploading === slot ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Subiendo...</> : "Cambiar Imagen"}
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
@@ -1698,41 +1739,19 @@ export default function AdminDashboard() {
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Email de Contacto</label>
-                        <Input
-                          type="email"
-                          value={storeForm.email_contacto}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, email_contacto: e.target.value }))}
-                          placeholder="contacto@monamourstudio.com"
-                          className="bg-background border-border"
-                        />
+                        <Input type="email" value={storeForm.email_contacto} onChange={(e) => setStoreForm((f) => ({ ...f, email_contacto: e.target.value }))} placeholder="contacto@monamourstudio.com" className="bg-background border-border" />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Email de Soporte</label>
-                        <Input
-                          type="email"
-                          value={storeForm.email_soporte}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, email_soporte: e.target.value }))}
-                          placeholder="soporte@monamourstudio.com"
-                          className="bg-background border-border"
-                        />
+                        <Input type="email" value={storeForm.email_soporte} onChange={(e) => setStoreForm((f) => ({ ...f, email_soporte: e.target.value }))} placeholder="soporte@monamourstudio.com" className="bg-background border-border" />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Telefono de Contacto</label>
-                        <Input
-                          value={storeForm.telefono_contacto}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, telefono_contacto: e.target.value }))}
-                          placeholder="+593 2 123 4567"
-                          className="bg-background border-border"
-                        />
+                        <Input value={storeForm.telefono_contacto} onChange={(e) => setStoreForm((f) => ({ ...f, telefono_contacto: e.target.value }))} placeholder="+593 2 123 4567" className="bg-background border-border" />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Telefono de Soporte</label>
-                        <Input
-                          value={storeForm.telefono_soporte}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, telefono_soporte: e.target.value }))}
-                          placeholder="+593 9 987 6543"
-                          className="bg-background border-border"
-                        />
+                        <Input value={storeForm.telefono_soporte} onChange={(e) => setStoreForm((f) => ({ ...f, telefono_soporte: e.target.value }))} placeholder="+593 9 987 6543" className="bg-background border-border" />
                       </div>
                     </div>
                   </div>
@@ -1745,28 +1764,12 @@ export default function AdminDashboard() {
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Envio Gratis desde (USD)</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={storeForm.envio_gratis_desde}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, envio_gratis_desde: e.target.value }))}
-                          placeholder="100.00"
-                          className="bg-background border-border"
-                        />
+                        <Input type="number" step="0.01" min="0" value={storeForm.envio_gratis_desde} onChange={(e) => setStoreForm((f) => ({ ...f, envio_gratis_desde: e.target.value }))} placeholder="100.00" className="bg-background border-border" />
                         <p className="text-xs text-muted-foreground">0 = siempre gratis, vacio = sin envio gratis</p>
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Costo de Envio Estandar (USD)</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={storeForm.costo_envio}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, costo_envio: e.target.value }))}
-                          placeholder="5.99"
-                          className="bg-background border-border"
-                        />
+                        <Input type="number" step="0.01" min="0" value={storeForm.costo_envio} onChange={(e) => setStoreForm((f) => ({ ...f, costo_envio: e.target.value }))} placeholder="5.99" className="bg-background border-border" />
                       </div>
                     </div>
                   </div>
@@ -1778,37 +1781,20 @@ export default function AdminDashboard() {
                     </h3>
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <Instagram className="h-4 w-4" /> Instagram
-                        </label>
-                        <Input
-                          value={storeForm.instagram_url}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, instagram_url: e.target.value }))}
-                          placeholder="https://instagram.com/monamourstudio"
-                          className="bg-background border-border"
-                        />
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2"><Instagram className="h-4 w-4" /> Instagram</label>
+                        <Input value={storeForm.instagram_url} onChange={(e) => setStoreForm((f) => ({ ...f, instagram_url: e.target.value }))} placeholder="https://instagram.com/monamourstudio" className="bg-background border-border" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <Globe className="h-4 w-4" /> TikTok
-                        </label>
-                        <Input
-                          value={storeForm.tiktok_url}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, tiktok_url: e.target.value }))}
-                          placeholder="https://tiktok.com/@monamourstudio"
-                          className="bg-background border-border"
-                        />
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2"><Facebook className="h-4 w-4" /> Facebook</label>
+                        <Input value={storeForm.facebook_url} onChange={(e) => setStoreForm((f) => ({ ...f, facebook_url: e.target.value }))} placeholder="https://facebook.com/monamourstudio" className="bg-background border-border" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <MessageCircle className="h-4 w-4" /> WhatsApp (Canal de Difusion)
-                        </label>
-                        <Input
-                          value={storeForm.whatsapp_url}
-                          onChange={(e) => setStoreForm((f) => ({ ...f, whatsapp_url: e.target.value }))}
-                          placeholder="https://wa.me/channel/..."
-                          className="bg-background border-border"
-                        />
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2"><Globe className="h-4 w-4" /> TikTok</label>
+                        <Input value={storeForm.tiktok_url} onChange={(e) => setStoreForm((f) => ({ ...f, tiktok_url: e.target.value }))} placeholder="https://tiktok.com/@monamourstudio" className="bg-background border-border" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground flex items-center gap-2"><MessageCircle className="h-4 w-4" /> WhatsApp (Canal de Difusion)</label>
+                        <Input value={storeForm.whatsapp_url} onChange={(e) => setStoreForm((f) => ({ ...f, whatsapp_url: e.target.value }))} placeholder="https://wa.me/channel/..." className="bg-background border-border" />
                       </div>
                     </div>
                   </div>
@@ -1819,41 +1805,77 @@ export default function AdminDashboard() {
                       <Palette className="h-4 w-4" /> Colores de la Pagina
                     </h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Selecciona los colores primario y de acento. Se generaran automaticamente los temas claro y oscuro.
+                      Primario para botones y enlaces. Acento para badges. Secundario atenua el fondo y el footer.
                     </p>
-                    <div className="grid sm:grid-cols-2 gap-6">
+                    <div className="grid sm:grid-cols-3 gap-6">
                       <div className="space-y-3">
                         <label className="text-sm font-medium text-foreground">Color Primario</label>
                         <div className="flex items-center gap-3">
-                          <input
-                            type="color"
-                            value={storeColorForm.primaryColor}
-                            onChange={(e) => setStoreColorForm((f) => ({ ...f, primaryColor: e.target.value }))}
-                            className="w-12 h-12 rounded-lg border border-border cursor-pointer"
-                          />
+                          <input type="color" value={storeColorForm.primaryColor} onChange={(e) => setStoreColorForm((f) => ({ ...f, primaryColor: e.target.value }))} className="w-12 h-12 rounded-lg border border-border cursor-pointer" />
                           <div>
                             <p className="text-sm font-mono text-foreground">{storeColorForm.primaryColor}</p>
-                            <p className="text-xs text-muted-foreground">Botones, enlaces, acentos principales</p>
+                            <p className="text-xs text-muted-foreground">Botones, enlaces</p>
                           </div>
                         </div>
-                        <div className="h-8 rounded-lg" style={{ backgroundColor: storeColorForm.primaryColor }} />
+                        <div className="h-6 rounded-lg" style={{ backgroundColor: storeColorForm.primaryColor }} />
                       </div>
                       <div className="space-y-3">
                         <label className="text-sm font-medium text-foreground">Color de Acento</label>
                         <div className="flex items-center gap-3">
-                          <input
-                            type="color"
-                            value={storeColorForm.accentColor}
-                            onChange={(e) => setStoreColorForm((f) => ({ ...f, accentColor: e.target.value }))}
-                            className="w-12 h-12 rounded-lg border border-border cursor-pointer"
-                          />
+                          <input type="color" value={storeColorForm.accentColor} onChange={(e) => setStoreColorForm((f) => ({ ...f, accentColor: e.target.value }))} className="w-12 h-12 rounded-lg border border-border cursor-pointer" />
                           <div>
                             <p className="text-sm font-mono text-foreground">{storeColorForm.accentColor}</p>
-                            <p className="text-xs text-muted-foreground">Badges, indicadores, destacados</p>
+                            <p className="text-xs text-muted-foreground">Badges, destacados</p>
                           </div>
                         </div>
-                        <div className="h-8 rounded-lg" style={{ backgroundColor: storeColorForm.accentColor }} />
+                        <div className="h-6 rounded-lg" style={{ backgroundColor: storeColorForm.accentColor }} />
                       </div>
+                      <div className="space-y-3">
+                        <label className="text-sm font-medium text-foreground">Color Secundario</label>
+                        <div className="flex items-center gap-3">
+                          <input type="color" value={storeColorForm.secondaryColor} onChange={(e) => setStoreColorForm((f) => ({ ...f, secondaryColor: e.target.value }))} className="w-12 h-12 rounded-lg border border-border cursor-pointer" />
+                          <div>
+                            <p className="text-sm font-mono text-foreground">{storeColorForm.secondaryColor}</p>
+                            <p className="text-xs text-muted-foreground">Fondo, footer</p>
+                          </div>
+                        </div>
+                        <div className="h-6 rounded-lg" style={{ backgroundColor: storeColorForm.secondaryColor }} />
+                      </div>
+                    </div>
+
+                    {/* Attenuation Slider */}
+                    <div className="mt-6 space-y-3">
+                      <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <Sliders className="h-4 w-4" /> Atenuacion del Fondo — {storeColorForm.atenuacion}%
+                      </label>
+                      <p className="text-xs text-muted-foreground">0% = fondo blanco puro, 50% = fondo notablemente tintado con el color secundario.</p>
+                      <input
+                        type="range"
+                        min={0}
+                        max={50}
+                        value={storeColorForm.atenuacion}
+                        onChange={(e) => setStoreColorForm((f) => ({ ...f, atenuacion: parseInt(e.target.value) }))}
+                        className="w-full accent-primary"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>0% (sin tinte)</span>
+                        <span>25%</span>
+                        <span>50% (maximo)</span>
+                      </div>
+                    </div>
+
+                    {/* Footer Light Text Toggle */}
+                    <div className="mt-6 flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="footerLightText"
+                        checked={footerLightText}
+                        onChange={(e) => setFooterLightText(e.target.checked)}
+                        className="h-4 w-4 rounded border-border accent-primary"
+                      />
+                      <label htmlFor="footerLightText" className="text-sm font-medium text-foreground cursor-pointer">
+                        Letra clara en el footer (blanco). Desactiva para letra oscura (negro).
+                      </label>
                     </div>
                   </div>
 
@@ -1865,20 +1887,17 @@ export default function AdminDashboard() {
                       onClick={async () => {
                         setStoreError(null)
                         setStoreSuccess(false)
-                        // Validate shipping fields as numbers
                         if (storeForm.envio_gratis_desde && isNaN(parseFloat(storeForm.envio_gratis_desde))) {
-                          setStoreError("El valor de 'Envio Gratis desde' debe ser un numero valido.")
-                          return
+                          setStoreError("El valor de 'Envio Gratis desde' debe ser un numero valido."); return
                         }
                         if (storeForm.costo_envio && isNaN(parseFloat(storeForm.costo_envio))) {
-                          setStoreError("El valor de 'Costo de Envio' debe ser un numero valido.")
-                          return
+                          setStoreError("El valor de 'Costo de Envio' debe ser un numero valido."); return
                         }
-
                         setStoreSaving(true)
                         try {
                           const primaryHsl = hexToHsl(storeColorForm.primaryColor)
                           const accentHsl = hexToHsl(storeColorForm.accentColor)
+                          const secondaryHsl = hexToHsl(storeColorForm.secondaryColor)
 
                           await storeConfigApi.update({
                             email_contacto: storeForm.email_contacto || null,
@@ -1890,12 +1909,18 @@ export default function AdminDashboard() {
                             instagram_url: storeForm.instagram_url || null,
                             tiktok_url: storeForm.tiktok_url || null,
                             whatsapp_url: storeForm.whatsapp_url || null,
+                            facebook_url: storeForm.facebook_url || null,
+                            footer_light_text: footerLightText,
                             color_primary_h: primaryHsl.h,
                             color_primary_s: primaryHsl.s,
                             color_primary_l: primaryHsl.l,
                             color_accent_h: accentHsl.h,
                             color_accent_s: accentHsl.s,
                             color_accent_l: accentHsl.l,
+                            color_secondary_h: secondaryHsl.h,
+                            color_secondary_s: secondaryHsl.s,
+                            color_secondary_l: secondaryHsl.l,
+                            atenuacion: storeColorForm.atenuacion,
                           })
                           await refreshStoreConfig()
                           setStoreSuccess(true)

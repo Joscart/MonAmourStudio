@@ -95,12 +95,22 @@ class ConfiguracionTiendaUpdate(BaseModel):
     instagram_url: Optional[str] = None
     tiktok_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
+    facebook_url: Optional[str] = None
     color_primary_h: Optional[int] = None
     color_primary_s: Optional[int] = None
     color_primary_l: Optional[int] = None
     color_accent_h: Optional[int] = None
     color_accent_s: Optional[int] = None
     color_accent_l: Optional[int] = None
+    color_secondary_h: Optional[int] = None
+    color_secondary_s: Optional[int] = None
+    color_secondary_l: Optional[int] = None
+    atenuacion: Optional[int] = None
+    home_image_url: Optional[str] = None
+    login_image_url: Optional[str] = None
+    register_image_url: Optional[str] = None
+    about_image_url: Optional[str] = None
+    footer_light_text: Optional[bool] = None
 
 
 class ConfiguracionTiendaResponse(BaseModel):
@@ -115,12 +125,22 @@ class ConfiguracionTiendaResponse(BaseModel):
     instagram_url: Optional[str] = None
     tiktok_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
+    facebook_url: Optional[str] = None
     color_primary_h: int = 340
     color_primary_s: int = 60
     color_primary_l: int = 65
     color_accent_h: int = 38
     color_accent_s: int = 70
     color_accent_l: int = 50
+    color_secondary_h: int = 220
+    color_secondary_s: int = 60
+    color_secondary_l: int = 50
+    atenuacion: int = 10
+    home_image_url: Optional[str] = None
+    login_image_url: Optional[str] = None
+    register_image_url: Optional[str] = None
+    about_image_url: Optional[str] = None
+    footer_light_text: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

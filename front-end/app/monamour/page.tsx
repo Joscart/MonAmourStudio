@@ -6,6 +6,7 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Heart, Gift, Sparkles, Star, ArrowRight } from "lucide-react"
+import { useStoreConfig } from "@/contexts/store-config-context"
 
 const values = [
   {
@@ -35,6 +36,8 @@ const values = [
 ]
 
 export default function MonAmourPage() {
+  const { config } = useStoreConfig()
+
   return (
     <main className="min-h-screen bg-background">
       <Header />
@@ -43,7 +46,7 @@ export default function MonAmourPage() {
       <section className="relative pt-20 min-h-[70vh] flex items-center">
         <div className="absolute inset-0">
           <Image
-            src="/images/hero-frames.jpg"
+            src={config.home_image_url || "/images/hero-frames.jpg"}
             alt="Mon Amour Studio"
             fill
             className="object-cover"
@@ -109,7 +112,7 @@ export default function MonAmourPage() {
             </div>
             <div className="relative aspect-[4/5] rounded-2xl overflow-hidden">
               <Image
-                src="/images/frame-2.jpg"
+                src={config.about_image_url || "/images/frame-2.jpg"}
                 alt="Taller Mon Amour Studio"
                 fill
                 className="object-cover"

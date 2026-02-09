@@ -170,6 +170,18 @@ class ResenaRepository:
         row = result.one()
         return float(row[0]), int(row[1])
 
+    async def list_featured(
+        self, db: AsyncSession, calificacion: int = 5, limit: int = 10
+    ) -> list[Resena]:
+        """Return random reviews with given rating (for testimonials)."""
+        result = await db.execute(
+            select(Resena)
+            .where(Resena.calificacion == calificacion)
+            .order_by(func.random())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
 
 # ── Tipos de producto ─────────────────────────────────────────────────────────
 

@@ -1,39 +1,36 @@
 "use client"
 
-import { useState } from "react"
-import { ChevronLeft, ChevronRight, Quote } from "lucide-react"
-
-const testimonials = [
-  {
-    id: 1,
-    text: "El marco llego bellamente empaquetado y supero todas las expectativas. Ahora guarda nuestra foto de boda y nos trae alegria todos los dias.",
-    author: "Maria & Carlos",
-    location: "Quito, Ecuador",
-  },
-  {
-    id: 2,
-    text: "Pedi un marco personalizado para el aniversario de mis padres y se emocionaron hasta las lagrimas. La calidad y artesania son excepcionales.",
-    author: "Ana Gomez",
-    location: "Guayaquil, Ecuador",
-  },
-  {
-    id: 3,
-    text: "Mon Amour Studio se ha convertido en mi opcion favorita para regalos significativos. Cada pieza se siente especial y las opciones de personalizacion son maravillosas.",
-    author: "Sofia Rodriguez",
-    location: "Cuenca, Ecuador",
-  },
-]
+import { useState, useEffect } from "react"
+import { ChevronLeft, ChevronRight, Quote, Star } from "lucide-react"
+import { reviewsApi } from "@/lib/api"
+import type { ResenaResponse } from "@/lib/types"
 
 export function TestimonialsSection() {
+  const [reviews, setReviews] = useState<ResenaResponse[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    reviewsApi
+      .featured(6)
+      .then((data) => setReviews(data))
+      .catch(() => {})
+      .finally(() => setLoaded(true))
+  }, [])
+
+  // Don't render if no 5-star reviews
+  if (loaded && reviews.length === 0) return null
+  if (!loaded) return null
 
   const nextTestimonial = () => {
-    setCurrentIndex((prev) => (prev + 1) % testimonials.length)
+    setCurrentIndex((prev) => (prev + 1) % reviews.length)
   }
 
   const prevTestimonial = () => {
-    setCurrentIndex((prev) => (prev - 1 + testimonials.length) % testimonials.length)
+    setCurrentIndex((prev) => (prev - 1 + reviews.length) % reviews.length)
   }
+
+  const current = reviews[currentIndex]
 
   return (
     <section className="py-20 lg:py-28 bg-background">
@@ -48,47 +45,54 @@ export function TestimonialsSection() {
         <div className="relative">
           <div className="text-center px-4 md:px-16">
             <Quote className="h-10 w-10 text-primary/30 mx-auto mb-6" />
+            {/* Stars */}
+            <div className="flex justify-center gap-1 mb-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star key={i} className="h-5 w-5 fill-accent text-accent" />
+              ))}
+            </div>
             <p className="font-serif text-xl sm:text-2xl text-foreground leading-relaxed mb-8">
-              {`"${testimonials[currentIndex].text}"`}
+              {`"${current.comentario}"`}
             </p>
             <div>
-              <p className="font-medium text-foreground">{testimonials[currentIndex].author}</p>
-              <p className="text-sm text-muted-foreground">{testimonials[currentIndex].location}</p>
+              <p className="font-medium text-foreground">{current.usuario_nombre}</p>
             </div>
           </div>
 
           {/* Navigation */}
-          <div className="flex items-center justify-center gap-4 mt-10">
-            <button
-              type="button"
-              onClick={prevTestimonial}
-              className="p-2 rounded-full border border-border hover:border-primary hover:text-primary transition-colors"
-              aria-label="Testimonio anterior"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div className="flex gap-2">
-              {testimonials.map((_, index) => (
-                <button
-                  type="button"
-                  key={`testimonial-dot-${testimonials[index].id}`}
-                  onClick={() => setCurrentIndex(index)}
-                  className={`w-2 h-2 rounded-full transition-colors ${
-                    index === currentIndex ? "bg-primary" : "bg-border hover:bg-primary/50"
-                  }`}
-                  aria-label={`Ir al testimonio ${index + 1}`}
-                />
-              ))}
+          {reviews.length > 1 && (
+            <div className="flex items-center justify-center gap-4 mt-10">
+              <button
+                type="button"
+                onClick={prevTestimonial}
+                className="p-2 rounded-full border border-border hover:border-primary hover:text-primary transition-colors"
+                aria-label="Testimonio anterior"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="flex gap-2">
+                {reviews.map((r, index) => (
+                  <button
+                    type="button"
+                    key={r.id}
+                    onClick={() => setCurrentIndex(index)}
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      index === currentIndex ? "bg-primary" : "bg-border hover:bg-primary/50"
+                    }`}
+                    aria-label={`Ir al testimonio ${index + 1}`}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={nextTestimonial}
+                className="p-2 rounded-full border border-border hover:border-primary hover:text-primary transition-colors"
+                aria-label="Siguiente testimonio"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={nextTestimonial}
-              className="p-2 rounded-full border border-border hover:border-primary hover:text-primary transition-colors"
-              aria-label="Siguiente testimonio"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </section>

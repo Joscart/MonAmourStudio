@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Eye, EyeOff, ArrowLeft, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { useStoreConfig } from "@/contexts/store-config-context"
 import { ApiError } from "@/lib/api"
 
 declare global {
@@ -29,6 +30,7 @@ declare global {
 export default function LoginPage() {
   const router = useRouter()
   const { login, loginWithGoogle, isAuthenticated, isLoading: authLoading } = useAuth()
+  const { config: storeConfig } = useStoreConfig()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -113,7 +115,7 @@ export default function LoginPage() {
       {/* Left Side - Image */}
       <div className="hidden lg:flex lg:w-1/2 relative">
         <Image
-          src="/images/hero-frames.jpg"
+          src={storeConfig.login_image_url || "/images/hero-frames.jpg"}
           alt="Mon Amour Studio"
           fill
           className="object-cover"

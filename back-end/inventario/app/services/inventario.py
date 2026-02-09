@@ -314,6 +314,13 @@ class InventarioService:
         items = await self.resena_repo.list_by_producto(db, producto_id)
         return [ResenaResponse.model_validate(r) for r in items]
 
+    async def list_featured_resenas(
+        self, db: AsyncSession, limit: int = 10
+    ) -> list[ResenaResponse]:
+        """Return random 5-star reviews for testimonials."""
+        items = await self.resena_repo.list_featured(db, calificacion=5, limit=limit)
+        return [ResenaResponse.model_validate(r) for r in items]
+
     async def delete_resena(
         self,
         db: AsyncSession,

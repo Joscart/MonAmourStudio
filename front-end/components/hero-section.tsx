@@ -1,15 +1,20 @@
+"use client"
+
 import Image from "next/image"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowRight } from "lucide-react"
+import { useStoreConfig } from "@/contexts/store-config-context"
 
 export function HeroSection() {
+  const { config } = useStoreConfig()
+
   return (
     <section className="relative min-h-screen flex items-center pt-20">
       {/* Background Image */}
       <div className="absolute inset-0 z-0">
         <Image
-          src="/images/hero-frames.jpg"
+          src={config.home_image_url || "/images/hero-frames.jpg"}
           alt="Coleccion de marcos personalizados premium"
           fill
           className="object-cover"
@@ -33,11 +38,6 @@ export function HeroSection() {
               <Link href="/products">
                 Ver Coleccion
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="border-foreground/20 hover:bg-secondary bg-transparent">
-              <Link href="#personalizar">
-                Personaliza Tu Marco
               </Link>
             </Button>
           </div>

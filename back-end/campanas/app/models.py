@@ -100,6 +100,7 @@ class ConfiguracionTienda(Base):
     instagram_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tiktok_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     whatsapp_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    facebook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     color_primary_h: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=340
     )
@@ -117,6 +118,25 @@ class ConfiguracionTienda(Base):
     )
     color_accent_l: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=50
+    )
+    color_secondary_h: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=220
+    )
+    color_secondary_s: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=60
+    )
+    color_secondary_l: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=50
+    )
+    atenuacion: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=10
+    )
+    home_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    login_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    register_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    about_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    footer_light_text: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, default=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
