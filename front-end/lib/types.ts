@@ -261,6 +261,23 @@ export interface EntregaResponse {
 
 // ── Campañas ────────────────────────────────────────────────
 
+export interface CampanaCreate {
+  titulo: string
+  mensaje_global: string
+  segmentacion?: string | null
+  fecha_inicio: string
+  fecha_fin: string
+}
+
+export interface CampanaUpdate {
+  titulo?: string
+  mensaje_global?: string
+  segmentacion?: string | null
+  fecha_inicio?: string
+  fecha_fin?: string
+  activa?: boolean
+}
+
 export interface CampanaResponse {
   id: string
   titulo: string
@@ -272,6 +289,89 @@ export interface CampanaResponse {
   created_at: string
   updated_at: string
   publicaciones_count: number
+}
+
+// ── Publicaciones ───────────────────────────────────────────
+
+export interface PublicacionCreate {
+  campana_id: string
+  tipo_media: string          // "imagen" | "video"
+  media_url?: string | null
+  caption: string
+  canal: string               // "instagram_post" | "instagram_reel" | "tiktok" | "facebook"
+  scheduled_at?: string | null
+}
+
+export interface PublicacionResponse {
+  id: string
+  campana_id: string
+  tipo_media: string
+  media_url: string | null
+  caption: string
+  canal: string
+  scheduled_at: string | null
+  publicada: boolean
+  created_at: string
+}
+
+// ── n8n Orchestrator ────────────────────────────────────────
+
+export interface WorkflowCreate {
+  name: string
+  description?: string | null
+  trigger_event: string
+  webhook_path?: string | null
+  active?: boolean
+}
+
+export interface WorkflowUpdate {
+  name?: string
+  description?: string | null
+  trigger_event?: string
+  webhook_path?: string | null
+  active?: boolean
+  n8n_workflow_id?: string | null
+}
+
+export interface WorkflowResponse {
+  id: string
+  n8n_workflow_id: string | null
+  name: string
+  description: string | null
+  trigger_event: string
+  webhook_path: string | null
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface NotificationPreferenceCreate {
+  usuario_id: string
+  nombre_admin: string
+  canal: "whatsapp" | "email"
+  destino: string
+  eventos: string[]
+  activo?: boolean
+}
+
+export interface NotificationPreferenceUpdate {
+  nombre_admin?: string
+  canal?: "whatsapp" | "email"
+  destino?: string
+  eventos?: string[]
+  activo?: boolean
+}
+
+export interface NotificationPreferenceResponse {
+  id: string
+  usuario_id: string
+  nombre_admin: string
+  canal: string
+  destino: string
+  eventos: string[]
+  activo: boolean
+  created_at: string
+  updated_at: string
 }
 
 // ── Frontend Cart ───────────────────────────────────────────

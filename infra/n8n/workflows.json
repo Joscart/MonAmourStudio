@@ -1,0 +1,1251 @@
+[
+  {
+    "id": "order-orchestration",
+    "title": "Orquestación Inicial de Pedido",
+    "case_use": "Cuando un cliente realiza un pedido en línea, n8n orquesta la reserva de stock en Inventario e inicia el flujo de pago en Pedidos. Si algún paso falla se compensa el stock y se notifica al admin.",
+    "producer_microservice": "Pedidos",
+    "consumers_microservices": ["Inventario", "Pedidos", "Campañas", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{ORDER_CREATED_TOPIC|order.created}}",
+      "expected_payload_fields": [
+        "event",
+        "event_id",
+        "pedido_id",
+        "usuario_id",
+        "total",
+        "items"
+      ]
+    },
+    "context": "El microservicio Pedidos publica el evento order.created al topic Kafka cuando un cliente confirma su carrito. n8n consume ese evento y ejecuta la saga de orquestación: reservar stock → iniciar pago → publicar order.orchestrated.",
+    "objective": "Garantizar que cada pedido nuevo pase por reserva de stock y creación de intento de pago de forma atómica (saga orquestada), con compensación automática ante fallos.",
+    "preconditions": [
+      "El microservicio Pedidos está activo y publica a {{ORDER_CREATED_TOPIC|order.created}}",
+      "El microservicio Inventario expone el endpoint de reserva de stock",
+      "Redis disponible para deduplicación de event_id",
+      "Credenciales {{INVENTORY_API_KEY}} y {{PAYMENT_API_KEY}} configuradas en n8n"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento order.created",
+        "node_type": "Kafka Trigger",
+        "description": "Suscribirse al topic {{ORDER_CREATED_TOPIC|order.created}} con consumer group {{N8N_CONSUMER_GROUP|n8n-order-orch}}. Extraer event_id, pedido_id, usuario_id, items, total.",
+        "timeout_seconds": 30
+      },
+      {
+        "step": 2,
+        "name": "Generar trace_id y correlation_id",
+        "node_type": "Set",
+        "description": "Si el mensaje no trae trace_id, generar UUID v4. Asignar correlation_id = pedido_id. Propagar ambos en headers de todas las llamadas HTTP posteriores."
+      },
+      {
+        "step": 3,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Consultar clave idempotency:order-orch:{{EVENT_ID}} en {{REDIS_URL}}. Si existe, descartar mensaje (ya procesado). Si no existe, continuar y guardar clave con TTL de 48h."
+      },
+      {
+        "step": 4,
+        "name": "Reservar stock en Inventario",
+        "node_type": "HTTP Request",
+        "description": "Para cada item del pedido, POST a {{INVENTORY_RESERVE_ENDPOINT|/api/inventory/{product_id}/reserve}} con body {cantidad, pedido_id}. Headers: Authorization Bearer {{INVENTORY_API_KEY}}, X-Trace-Id, X-Correlation-Id.",
+        "endpoint_placeholder": "{{INVENTORY_RESERVE_ENDPOINT|/api/inventory/{product_id}/reserve}}",
+        "method": "POST",
+        "expected_response": {"success": true, "message": "Stock reservado"},
+        "retries": 3,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 5,
+        "name": "Evaluar resultado de reserva",
+        "node_type": "If",
+        "description": "Si todas las reservas fueron exitosas → continuar a paso 6. Si alguna falló → ir a paso 8 (compensación)."
+      },
+      {
+        "step": 6,
+        "name": "Iniciar intento de pago",
+        "node_type": "HTTP Request",
+        "description": "POST a {{PAYMENT_CREATE_ENDPOINT|/api/orders/{pedido_id}/pago}} con body {metodo_pago, monto: total}. Headers: Authorization Bearer {{PAYMENT_API_KEY}}, X-Trace-Id, X-Correlation-Id.",
+        "endpoint_placeholder": "{{PAYMENT_CREATE_ENDPOINT|/api/orders/{pedido_id}/pago}}",
+        "method": "POST",
+        "expected_response": {"pago_exitoso": true},
+        "retries": 2,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 30
+      },
+      {
+        "step": 7,
+        "name": "Publicar order.orchestrated",
+        "node_type": "Kafka",
+        "description": "Publicar evento al topic {{ORDER_ORCHESTRATED_TOPIC|order.orchestrated}} con payload: {event: 'order.orchestrated', pedido_id, usuario_id, stock_reserved: true, payment_initiated: true, trace_id, correlation_id, timestamp}."
+      },
+      {
+        "step": 8,
+        "name": "Compensación: liberar stock",
+        "node_type": "HTTP Request",
+        "description": "Si el pago falló o la reserva parcial falló: POST a {{INVENTORY_RELEASE_ENDPOINT|/api/inventory/{product_id}/release}} para cada item ya reservado. Headers: Authorization Bearer {{INVENTORY_API_KEY}}.",
+        "endpoint_placeholder": "{{INVENTORY_RELEASE_ENDPOINT|/api/inventory/{product_id}/release}}",
+        "method": "POST",
+        "retries": 3,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 9,
+        "name": "Actualizar estado del pedido a fallido",
+        "node_type": "HTTP Request",
+        "description": "PUT a {{ORDER_STATUS_ENDPOINT|/api/orders/{pedido_id}/estado}} con body {estado: 'cancelado', motivo: 'stock_o_pago_fallido'}.",
+        "endpoint_placeholder": "{{ORDER_STATUS_ENDPOINT|/api/orders/{pedido_id}/estado}}",
+        "method": "PUT",
+        "retries": 2,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 10,
+        "name": "Emitir métricas y finalizar",
+        "node_type": "Function",
+        "description": "Registrar duration_ms, success/failure. Si falló, publicar a DLQ si se agotaron reintentos."
+      }
+    ],
+    "outputs": [
+      "{{ORDER_ORCHESTRATED_TOPIC|order.orchestrated}}",
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{DLQ_ORDER_ORCH_TOPIC|dead-letter.order-orchestration}}"
+    ],
+    "idempotency": {
+      "strategy": "Persistir event_id en Redis con TTL 48h. Antes de procesar, verificar existencia. Si existe, skip.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "event_id"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential (2s, 4s, 8s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_ORDER_ORCH_TOPIC|dead-letter.order-orchestration}}",
+      "on_failure_publish": true,
+      "metadata": ["event_id", "pedido_id", "error_message", "trace_id", "correlation_id", "failed_step", "timestamp", "attempt_count"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.order_orchestration.duration_ms", "workflow.order_orchestration.success_count", "workflow.order_orchestration.failure_count", "workflow.order_orchestration.dlq_count"],
+      "trace_fields": ["trace_id", "correlation_id", "pedido_id", "event_id"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{INVENTORY_API_KEY}}", "{{PAYMENT_API_KEY}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token por servicio. Credenciales almacenadas en n8n Credential Store con nombres: InventarioAPIKey, PedidosPagoAPIKey, RedisCredential."
+    },
+    "tests": {
+      "happy_path": "Publicar event order.created con 2 items con stock suficiente. Verificar: stock decrementado en Inventario, pago iniciado, evento order.orchestrated publicado, clave idempotencia en Redis.",
+      "failure_case_1": "Publicar order.created con item sin stock suficiente. Verificar: reservas parciales compensadas (stock liberado), pedido marcado como cancelado, evento enviado a DLQ con motivo 'sin_stock'.",
+      "failure_case_2": "Publicar order.created con stock OK pero endpoint de pago retorna 503 (3 veces). Verificar: stock liberado tras agotar reintentos, pedido cancelado, mensaje en DLQ con attempt_count=3."
+    },
+    "notes": "BUG CONOCIDO: El inventario actualmente publica stock.reserved al topic 'inventory' pero Pedidos consume del topic 'stock.reserved'. Este workflow actúa como orquestador y NO depende de ese consumer directo, sino que llama a los endpoints HTTP. Aun así, se recomienda alinear los topics en el código fuente."
+  },
+  {
+    "id": "payment-confirmation",
+    "title": "Confirmación de Pago",
+    "case_use": "Cuando la pasarela de pago confirma un pago exitoso, n8n actualiza el estado del pedido, programa la entrega y dispara notificaciones al cliente.",
+    "producer_microservice": "Pedidos",
+    "consumers_microservices": ["Pedidos", "Entregas", "Usuarios", "Campañas", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{PAYMENT_SUCCEEDED_TOPIC|payment.succeeded}}",
+      "expected_payload_fields": [
+        "event",
+        "event_id",
+        "pedido_id",
+        "usuario_id",
+        "monto",
+        "metodo_pago",
+        "referencia_pago"
+      ]
+    },
+    "context": "El microservicio Pedidos (módulo PasarelaPago) publica payment.succeeded cuando el pago se procesa correctamente. n8n consume este evento para actualizar el estado del pedido a 'confirmado', invocar la creación de orden de entrega en Entregas y solicitar notificación al cliente.",
+    "objective": "Coordinar la transición post-pago: confirmar pedido, crear entrega y notificar al cliente en un flujo único y trazable.",
+    "preconditions": [
+      "El microservicio Pedidos ha publicado payment.succeeded al topic Kafka",
+      "El microservicio Entregas expone endpoint de creación de entrega",
+      "Redis disponible para deduplicación",
+      "Credenciales {{ORDERS_API_KEY}} y {{DELIVERIES_API_KEY}} configuradas"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento payment.succeeded",
+        "node_type": "Kafka Trigger",
+        "description": "Suscribirse a {{PAYMENT_SUCCEEDED_TOPIC|payment.succeeded}} con consumer group {{N8N_CONSUMER_GROUP|n8n-payment-confirm}}. Extraer event_id, pedido_id, usuario_id, monto, referencia_pago."
+      },
+      {
+        "step": 2,
+        "name": "Generar/propagar trace_id y correlation_id",
+        "node_type": "Set",
+        "description": "trace_id = mensaje.trace_id ?? UUID v4. correlation_id = pedido_id."
+      },
+      {
+        "step": 3,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Consultar idempotency:payment-confirm:{{EVENT_ID}} en Redis. Si existe, skip. Si no, registrar con TTL 48h."
+      },
+      {
+        "step": 4,
+        "name": "Actualizar estado del pedido a 'confirmado'",
+        "node_type": "HTTP Request",
+        "description": "PUT a {{ORDER_STATUS_ENDPOINT|/api/orders/{pedido_id}/estado}} con body {estado: 'confirmado'}. Headers: Authorization Bearer {{ORDERS_API_KEY}}, X-Trace-Id.",
+        "endpoint_placeholder": "{{ORDER_STATUS_ENDPOINT|/api/orders/{pedido_id}/estado}}",
+        "method": "PUT",
+        "expected_response": {"estado": "confirmado"},
+        "retries": 3,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 5,
+        "name": "Obtener datos del pedido completo",
+        "node_type": "HTTP Request",
+        "description": "GET a {{ORDER_DETAIL_ENDPOINT|/api/orders/{pedido_id}}} para obtener dirección de envío, items, datos del cliente.",
+        "endpoint_placeholder": "{{ORDER_DETAIL_ENDPOINT|/api/orders/{pedido_id}}}",
+        "method": "GET",
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 6,
+        "name": "Crear orden de entrega",
+        "node_type": "HTTP Request",
+        "description": "POST a {{DELIVERY_CREATE_ENDPOINT|/api/deliveries/}} con body {pedido_id, direccion, items, destinatario}. Headers: Authorization Bearer {{DELIVERIES_API_KEY}}, X-Trace-Id.",
+        "endpoint_placeholder": "{{DELIVERY_CREATE_ENDPOINT|/api/deliveries/}}",
+        "method": "POST",
+        "expected_response": {"id": "{{ENTREGA_ID}}"},
+        "retries": 3,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 7,
+        "name": "Solicitar notificación al cliente",
+        "node_type": "Kafka",
+        "description": "Publicar evento al topic {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con payload: {tipo: 'pago_confirmado', canal: 'email', destinatario: usuario_email, datos: {pedido_id, monto, fecha_estimada_entrega}, trace_id, correlation_id}."
+      },
+      {
+        "step": 8,
+        "name": "Emitir métricas",
+        "node_type": "Function",
+        "description": "Registrar duration_ms, success_count. Publicar audit.log con detalles de la operación."
+      }
+    ],
+    "outputs": [
+      "{{SHIPMENT_SCHEDULED_TOPIC|shipment.scheduled}}",
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "Persistir event_id en Redis con TTL 48h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "event_id"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential (2s, 4s, 8s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_PAYMENT_CONFIRM_TOPIC|dead-letter.payment-confirmation}}",
+      "on_failure_publish": true,
+      "metadata": ["event_id", "pedido_id", "error_message", "trace_id", "failed_step", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.payment_confirmation.duration_ms", "workflow.payment_confirmation.success_count", "workflow.payment_confirmation.failure_count", "workflow.payment_confirmation.dlq_count"],
+      "trace_fields": ["trace_id", "correlation_id", "pedido_id", "referencia_pago"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{ORDERS_API_KEY}}", "{{DELIVERIES_API_KEY}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token. Credenciales en n8n: PedidosAPIKey, EntregasAPIKey, RedisCredential."
+    },
+    "tests": {
+      "happy_path": "Publicar payment.succeeded. Verificar: pedido en estado 'confirmado', entrega creada en Entregas, notificación email encolada, audit.log publicado.",
+      "failure_case_1": "Endpoint de Entregas retorna 503 tres veces. Verificar: pedido confirmado (ese paso sí pasó), entrega NO creada, mensaje en DLQ con failed_step='crear_entrega'.",
+      "failure_case_2": "Mensaje duplicado (mismo event_id). Verificar: segundo mensaje descartado por Redis, sin cambios duplicados en pedido/entrega."
+    },
+    "notes": "El microservicio Entregas ya consume directamente de payment.succeeded via su consumer Kafka. Este workflow añade orquestación para casos donde se requieran pasos adicionales (obtener detalle, notificar) que el consumer simple no hace."
+  },
+  {
+    "id": "stock-compensation",
+    "title": "Compensación de Stock",
+    "case_use": "Cuando se libera stock (pedido cancelado, pago rechazado), n8n verifica la integridad del inventario, genera alertas si hay umbrales críticos y registra la auditoría.",
+    "producer_microservice": "Inventario",
+    "consumers_microservices": ["Inventario", "Campañas", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{STOCK_RELEASED_TOPIC|inventory}}",
+      "expected_payload_fields": [
+        "event",
+        "product_id",
+        "pedido_id",
+        "cantidad",
+        "disponibilidad_restante"
+      ]
+    },
+    "context": "El microservicio Inventario publica al topic 'inventory' con event='stock.released' cuando se libera stock reservado. NOTA: el topic real es 'inventory' (no 'stock.released'). n8n filtra por campo event='stock.released'.",
+    "objective": "Monitorear liberaciones de stock, verificar integridad del inventario, generar alertas de disponibilidad y mantener registro de auditoría de compensaciones.",
+    "preconditions": [
+      "Inventario está activo y publica eventos stock.released al topic 'inventory'",
+      "n8n tiene acceso al endpoint de consulta de productos",
+      "Redis disponible para deduplicación"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento stock.released del topic inventory",
+        "node_type": "Kafka Trigger",
+        "description": "Suscribirse a {{STOCK_RELEASED_TOPIC|inventory}} con consumer group {{N8N_CONSUMER_GROUP|n8n-stock-compensation}}. Filtrar mensajes donde event == 'stock.released'."
+      },
+      {
+        "step": 2,
+        "name": "Filtrar evento",
+        "node_type": "If",
+        "description": "Si $json.event !== 'stock.released', descartar mensaje. Solo procesar eventos de liberación de stock."
+      },
+      {
+        "step": 3,
+        "name": "Generar trace_id y correlation_id",
+        "node_type": "Set",
+        "description": "trace_id = UUID v4. correlation_id = pedido_id."
+      },
+      {
+        "step": 4,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Clave idempotency:stock-comp:{product_id}:{pedido_id}. TTL 24h."
+      },
+      {
+        "step": 5,
+        "name": "Consultar producto actual",
+        "node_type": "HTTP Request",
+        "description": "GET a {{INVENTORY_PRODUCT_ENDPOINT|/api/inventory/{product_id}}} para verificar disponibilidad actual real.",
+        "endpoint_placeholder": "{{INVENTORY_PRODUCT_ENDPOINT|/api/inventory/{product_id}}}",
+        "method": "GET",
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 6,
+        "name": "Evaluar umbrales de stock",
+        "node_type": "Switch",
+        "description": "Si disponibilidad == 0 → alerta 'agotado'. Si disponibilidad < 5 → alerta 'bajo'. Si disponibilidad >= 5 → log normal."
+      },
+      {
+        "step": 7,
+        "name": "Publicar alerta administrativa si aplica",
+        "node_type": "Kafka",
+        "description": "Si stock agotado o bajo, publicar a {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con tipo='alerta_stock', destino='admin', datos del producto."
+      },
+      {
+        "step": 8,
+        "name": "Registrar en audit.log",
+        "node_type": "Kafka",
+        "description": "Publicar a {{AUDIT_LOG_TOPIC|audit.log}} con {accion: 'stock_compensado', product_id, pedido_id, cantidad_liberada, disponibilidad_final, trace_id}."
+      }
+    ],
+    "outputs": [
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "Clave compuesta product_id:pedido_id en Redis, TTL 24h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "product_id + pedido_id"
+    },
+    "retries": {
+      "max_attempts": 2,
+      "backoff_strategy": "linear (3s, 6s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_STOCK_COMP_TOPIC|dead-letter.stock-compensation}}",
+      "on_failure_publish": true,
+      "metadata": ["product_id", "pedido_id", "error_message", "trace_id", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.stock_compensation.duration_ms", "workflow.stock_compensation.success_count", "workflow.stock_compensation.failure_count", "workflow.stock_compensation.dlq_count", "inventory.stock_alert_count"],
+      "trace_fields": ["trace_id", "correlation_id", "product_id", "pedido_id"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{INVENTORY_API_KEY}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token. Credencial: InventarioAPIKey."
+    },
+    "tests": {
+      "happy_path": "Publicar evento stock.released con cantidad=5, disponibilidad_restante=20. Verificar: audit.log publicado, sin alerta (stock > 5).",
+      "failure_case_1": "Publicar evento con disponibilidad_restante=0. Verificar: alerta 'agotado' enviada a notification.request, audit.log con flag critico.",
+      "failure_case_2": "Endpoint de Inventario retorna 404 (producto eliminado). Verificar: error registrado, mensaje enviado a DLQ, alerta admin."
+    },
+    "notes": "IMPORTANTE: El topic real donde Inventario publica es 'inventory', no 'stock.released'. Este workflow debe suscribirse a 'inventory' y filtrar por event=='stock.released'. Se usa el placeholder {{STOCK_RELEASED_TOPIC|inventory}} para reflejar el estado actual del código."
+  },
+  {
+    "id": "shipment-scheduling",
+    "title": "Programación de Envío",
+    "case_use": "Tras la confirmación de pago, n8n coordina la creación de la guía de entrega, valida la zona de cobertura y programa la recogida con el transportista.",
+    "producer_microservice": "Pedidos",
+    "consumers_microservices": ["Entregas", "Pedidos", "Usuarios", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{PAYMENT_SUCCEEDED_TOPIC|payment.succeeded}}",
+      "expected_payload_fields": [
+        "event",
+        "event_id",
+        "pedido_id",
+        "usuario_id",
+        "monto"
+      ]
+    },
+    "context": "Una vez que payment.succeeded es publicado por Pedidos, n8n verifica que la zona de entrega sea válida, genera la orden de entrega en el microservicio Entregas y notifica al cliente con la guía.",
+    "objective": "Automatizar la generación de guías de entrega, validar zonas de cobertura y programar recogidas, notificando al cliente en cada paso.",
+    "preconditions": [
+      "Pedidos ha publicado payment.succeeded",
+      "Entregas expone endpoints para crear entrega y validar zona",
+      "Datos de dirección disponibles en el pedido"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento payment.succeeded",
+        "node_type": "Kafka Trigger",
+        "description": "Topic {{PAYMENT_SUCCEEDED_TOPIC|payment.succeeded}}, consumer group {{N8N_CONSUMER_GROUP|n8n-shipment-sched}}."
+      },
+      {
+        "step": 2,
+        "name": "Propagar trazabilidad",
+        "node_type": "Set",
+        "description": "trace_id = existente o nuevo UUID. correlation_id = pedido_id."
+      },
+      {
+        "step": 3,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Clave idempotency:shipment-sched:{{EVENT_ID}}. TTL 48h."
+      },
+      {
+        "step": 4,
+        "name": "Obtener detalle del pedido",
+        "node_type": "HTTP Request",
+        "description": "GET {{ORDER_DETAIL_ENDPOINT|/api/orders/{pedido_id}}} para obtener dirección, items.",
+        "endpoint_placeholder": "{{ORDER_DETAIL_ENDPOINT|/api/orders/{pedido_id}}}",
+        "method": "GET",
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 5,
+        "name": "Validar zona de entrega",
+        "node_type": "HTTP Request",
+        "description": "POST {{DELIVERY_VALIDATE_ZONE_ENDPOINT|/api/deliveries/validar-zona}} con {ciudad, provincia, codigo_postal}.",
+        "endpoint_placeholder": "{{DELIVERY_VALIDATE_ZONE_ENDPOINT|/api/deliveries/validar-zona}}",
+        "method": "POST",
+        "expected_response": {"zona_valida": true, "costo_envio": 5.00},
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 6,
+        "name": "Evaluar validez de zona",
+        "node_type": "If",
+        "description": "Si zona_valida == false → notificar admin y cliente (zona no cubierta), ir a paso 9. Si zona_valida == true → continuar."
+      },
+      {
+        "step": 7,
+        "name": "Crear orden de entrega",
+        "node_type": "HTTP Request",
+        "description": "POST {{DELIVERY_CREATE_ENDPOINT|/api/deliveries/}} con payload completo de entrega.",
+        "endpoint_placeholder": "{{DELIVERY_CREATE_ENDPOINT|/api/deliveries/}}",
+        "method": "POST",
+        "retries": 3,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 8,
+        "name": "Publicar shipment.scheduled",
+        "node_type": "Kafka",
+        "description": "Publicar a {{SHIPMENT_SCHEDULED_TOPIC|shipment.scheduled}} con {pedido_id, entrega_id, fecha_estimada, transportista}."
+      },
+      {
+        "step": 9,
+        "name": "Notificar al cliente",
+        "node_type": "Kafka",
+        "description": "Publicar a {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con {tipo: 'envio_programado' o 'zona_no_cubierta', destinatario, datos}."
+      },
+      {
+        "step": 10,
+        "name": "Emitir métricas y audit",
+        "node_type": "Function",
+        "description": "Registrar métricas de duración, éxito/fallo. Publicar a audit.log."
+      }
+    ],
+    "outputs": [
+      "{{SHIPMENT_SCHEDULED_TOPIC|shipment.scheduled}}",
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "event_id en Redis TTL 48h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "event_id"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential (2s, 4s, 8s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_SHIPMENT_SCHED_TOPIC|dead-letter.shipment-scheduling}}",
+      "on_failure_publish": true,
+      "metadata": ["event_id", "pedido_id", "error_message", "trace_id", "failed_step", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.shipment_scheduling.duration_ms", "workflow.shipment_scheduling.success_count", "workflow.shipment_scheduling.failure_count", "workflow.shipment_scheduling.dlq_count"],
+      "trace_fields": ["trace_id", "correlation_id", "pedido_id", "entrega_id"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{ORDERS_API_KEY}}", "{{DELIVERIES_API_KEY}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token. Credenciales: PedidosAPIKey, EntregasAPIKey."
+    },
+    "tests": {
+      "happy_path": "payment.succeeded con dirección en zona cubierta. Verificar: entrega creada, shipment.scheduled publicado, notificación email al cliente.",
+      "failure_case_1": "Dirección en zona no cubierta. Verificar: entrega NO creada, notificación 'zona_no_cubierta' al cliente y alerta admin.",
+      "failure_case_2": "Endpoint de Entregas caído (503 × 3). Verificar: reintentos agotados, mensaje a DLQ, alerta admin."
+    },
+    "notes": "El microservicio Entregas ya tiene un consumer propio de payment.succeeded que crea entregas automáticamente. Este workflow añade la validación de zona y lógica de notificación que el consumer simple no tiene."
+  },
+  {
+    "id": "notification-dispatcher",
+    "title": "Dispatcher de Notificaciones",
+    "case_use": "Centralizar el envío de todas las notificaciones (email, WhatsApp, push) a clientes y administradores del e-commerce.",
+    "producer_microservice": "Varios (Pedidos, Entregas, Inventario, Campañas)",
+    "consumers_microservices": ["Usuarios", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "expected_payload_fields": [
+        "tipo",
+        "canal",
+        "destinatario",
+        "datos",
+        "trace_id",
+        "correlation_id"
+      ]
+    },
+    "context": "Múltiples workflows y microservicios publican solicitudes de notificación al topic notification.request. Este workflow centraliza el routing y envío por el canal adecuado (email SMTP, WhatsApp API, push notification).",
+    "objective": "Rutear y enviar notificaciones multi-canal de forma confiable, con reintentos y registro de entrega.",
+    "preconditions": [
+      "Topic notification.request configurado",
+      "Credenciales SMTP ({{SMTP_CREDENTIAL}}) configuradas",
+      "Credenciales WhatsApp API ({{WHATSAPP_API_CREDENTIAL}}) si se usa",
+      "Templates de notificación accesibles"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir notificación",
+        "node_type": "Kafka Trigger",
+        "description": "Topic {{NOTIFICATION_REQUEST_TOPIC|notification.request}}, consumer group {{N8N_CONSUMER_GROUP|n8n-notification-dispatch}}."
+      },
+      {
+        "step": 2,
+        "name": "Propagar trazabilidad",
+        "node_type": "Set",
+        "description": "Extraer trace_id y correlation_id del mensaje. Generar si no vienen."
+      },
+      {
+        "step": 3,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Clave idempotency:notif:{trace_id}:{tipo}:{destinatario}. TTL 24h."
+      },
+      {
+        "step": 4,
+        "name": "Determinar canal de envío",
+        "node_type": "Switch",
+        "description": "Switch por campo 'canal': 'email' → paso 5, 'whatsapp' → paso 6, 'push' → paso 7, 'admin_slack' → paso 8."
+      },
+      {
+        "step": 5,
+        "name": "Enviar email SMTP",
+        "node_type": "SMTP",
+        "description": "Enviar email usando credencial {{SMTP_CREDENTIAL}}. De: {{SMTP_FROM|noreply@monamourstudio.com}}. Para: destinatario. Asunto y body según tipo de notificación y template.",
+        "retries": 3,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 30
+      },
+      {
+        "step": 6,
+        "name": "Enviar WhatsApp",
+        "node_type": "HTTP Request",
+        "description": "POST a {{WHATSAPP_API_ENDPOINT|https://graph.facebook.com/v18.0/{phone_id}/messages}} con template de WhatsApp Business API. Auth: Bearer {{WHATSAPP_API_TOKEN}}.",
+        "endpoint_placeholder": "{{WHATSAPP_API_ENDPOINT}}",
+        "method": "POST",
+        "retries": 2,
+        "retry_backoff_seconds": 10,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 7,
+        "name": "Enviar push notification",
+        "node_type": "HTTP Request",
+        "description": "POST a {{PUSH_NOTIFICATION_ENDPOINT}} con payload FCM/APNs. Auth: {{PUSH_API_KEY}}.",
+        "endpoint_placeholder": "{{PUSH_NOTIFICATION_ENDPOINT}}",
+        "method": "POST",
+        "retries": 2,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 8,
+        "name": "Enviar a Slack (alertas admin)",
+        "node_type": "Slack",
+        "description": "Enviar mensaje al canal {{SLACK_ADMIN_CHANNEL|#mon-amour-alerts}} usando credencial {{SLACK_CREDENTIAL}}.",
+        "retries": 2,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 9,
+        "name": "Registrar resultado",
+        "node_type": "Kafka",
+        "description": "Publicar a {{AUDIT_LOG_TOPIC|audit.log}} con {accion: 'notificacion_enviada', canal, destinatario, tipo, resultado: ok/error, trace_id}."
+      }
+    ],
+    "outputs": [
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "Clave compuesta trace_id:tipo:destinatario en Redis, TTL 24h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "trace_id + tipo + destinatario"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential con backoff diferente según canal (email: 5s, WhatsApp: 10s, push: 5s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_NOTIFICATION_TOPIC|dead-letter.notification-dispatcher}}",
+      "on_failure_publish": true,
+      "metadata": ["tipo", "canal", "destinatario", "error_message", "trace_id", "attempt_count", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.notification_dispatcher.duration_ms", "workflow.notification_dispatcher.success_count", "workflow.notification_dispatcher.failure_count", "workflow.notification_dispatcher.dlq_count", "notification.sent_by_channel"],
+      "trace_fields": ["trace_id", "correlation_id", "tipo", "canal", "destinatario"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{SMTP_CREDENTIAL}}", "{{WHATSAPP_API_CREDENTIAL}}", "{{PUSH_API_KEY}}", "{{SLACK_CREDENTIAL}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Varía por canal: SMTP auth, Bearer Token para WhatsApp y Push, OAuth2 para Slack. Todas almacenadas en n8n Credential Store."
+    },
+    "tests": {
+      "happy_path": "Publicar notification.request con canal='email', tipo='pago_confirmado'. Verificar: email SMTP enviado, audit.log registrado.",
+      "failure_case_1": "SMTP server caído (3 reintentos fallan). Verificar: mensaje a DLQ, audit.log con resultado='error'.",
+      "failure_case_2": "Canal desconocido (canal='sms'). Verificar: error capturado, mensaje a DLQ con motivo 'canal_no_soportado'."
+    },
+    "notes": "Este workflow es el hub central de notificaciones. Todos los demás workflows publican a notification.request en lugar de enviar notificaciones directamente, lo que permite cambiar canales sin modificar cada workflow."
+  },
+  {
+    "id": "campaign-activation",
+    "title": "Activación de Campaña Publicitaria",
+    "case_use": "El administrador crea campañas publicitarias desde el dashboard y n8n automatiza su activación, publicación en canales digitales y notificación a clientes.",
+    "producer_microservice": "Campañas",
+    "consumers_microservices": ["Campañas", "Usuarios", "n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{CAMPAIGN_ACTIVATED_TOPIC|campana.activada}}",
+      "expected_payload_fields": [
+        "event",
+        "campana_id",
+        "nombre",
+        "tipo",
+        "fecha_inicio",
+        "fecha_fin",
+        "segmento_clientes"
+      ]
+    },
+    "context": "El microservicio Campañas publica campana.activada cuando un administrador activa una campaña desde el dashboard. También se puede disparar por cron para campañas programadas. n8n coordina la publicación digital y notificación masiva.",
+    "objective": "Automatizar la ejecución de campañas: publicar contenido en canales digitales, enviar notificaciones segmentadas a clientes y registrar métricas de alcance.",
+    "preconditions": [
+      "Campañas ha publicado campana.activada al topic Kafka",
+      "Lista de usuarios segmentados disponible vía Usuarios API",
+      "Templates de campaña configurados"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento campana.activada",
+        "node_type": "Kafka Trigger",
+        "description": "Topic {{CAMPAIGN_ACTIVATED_TOPIC|campana.activada}}, consumer group {{N8N_CONSUMER_GROUP|n8n-campaign-activation}}."
+      },
+      {
+        "step": 2,
+        "name": "Propagar trazabilidad",
+        "node_type": "Set",
+        "description": "trace_id = UUID v4. correlation_id = campana_id."
+      },
+      {
+        "step": 3,
+        "name": "Verificar idempotencia",
+        "node_type": "Redis",
+        "description": "Clave idempotency:campaign:{campana_id}. TTL 72h."
+      },
+      {
+        "step": 4,
+        "name": "Obtener detalle de campaña",
+        "node_type": "HTTP Request",
+        "description": "GET {{CAMPAIGN_DETAIL_ENDPOINT|/api/campaigns/{campana_id}}} para obtener contenido, imágenes, segmentos.",
+        "endpoint_placeholder": "{{CAMPAIGN_DETAIL_ENDPOINT|/api/campaigns/{campana_id}}}",
+        "method": "GET",
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 5,
+        "name": "Obtener lista de usuarios del segmento",
+        "node_type": "HTTP Request",
+        "description": "GET {{USERS_LIST_ENDPOINT|/api/users/}} para obtener emails de clientes registrados. Filtrar por segmento si aplica.",
+        "endpoint_placeholder": "{{USERS_LIST_ENDPOINT|/api/users/}}",
+        "method": "GET",
+        "retries": 2,
+        "retry_backoff_seconds": 2,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 6,
+        "name": "Generar lote de notificaciones",
+        "node_type": "Function",
+        "description": "Para cada usuario del segmento, crear mensaje de notificación con template de campaña. Dividir en batches de 50 para no sobrecargar."
+      },
+      {
+        "step": 7,
+        "name": "Publicar notificaciones por lote",
+        "node_type": "Kafka",
+        "description": "Para cada batch, publicar a {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con {tipo: 'campaña', canal: 'email', destinatario, datos: {campana_nombre, contenido, url_campaña}}."
+      },
+      {
+        "step": 8,
+        "name": "Publicar en redes sociales (opcional)",
+        "node_type": "HTTP Request",
+        "description": "Si la campaña tiene flag publicar_redes=true, POST a {{SOCIAL_MEDIA_API_ENDPOINT}} con contenido. Placeholder para integración futura.",
+        "endpoint_placeholder": "{{SOCIAL_MEDIA_API_ENDPOINT}}",
+        "method": "POST",
+        "retries": 1,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 30
+      },
+      {
+        "step": 9,
+        "name": "Registrar métricas de campaña",
+        "node_type": "Kafka",
+        "description": "Publicar a {{AUDIT_LOG_TOPIC|audit.log}} con {accion: 'campaña_ejecutada', campana_id, total_destinatarios, canales_usados, trace_id}."
+      }
+    ],
+    "outputs": [
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "campana_id en Redis con TTL 72h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "campana_id"
+    },
+    "retries": {
+      "max_attempts": 2,
+      "backoff_strategy": "exponential (5s, 10s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_CAMPAIGN_TOPIC|dead-letter.campaign-activation}}",
+      "on_failure_publish": true,
+      "metadata": ["campana_id", "error_message", "trace_id", "total_enviados", "total_fallidos", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.campaign_activation.duration_ms", "workflow.campaign_activation.success_count", "workflow.campaign_activation.failure_count", "workflow.campaign_activation.dlq_count", "campaign.recipients_count", "campaign.emails_sent"],
+      "trace_fields": ["trace_id", "correlation_id", "campana_id"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{CAMPAIGNS_API_KEY}}", "{{USERS_API_KEY}}", "{{SMTP_CREDENTIAL}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token para APIs internas. SMTP para envío de emails. Credenciales: CampañasAPIKey, UsuariosAPIKey."
+    },
+    "tests": {
+      "happy_path": "Activar campaña con segmento de 100 usuarios. Verificar: 100 notificaciones publicadas a notification.request, audit.log con total_destinatarios=100.",
+      "failure_case_1": "API de Usuarios retorna 500. Verificar: workflow falla gracefully, mensaje a DLQ, campaña marcada como 'fallo_envío'.",
+      "failure_case_2": "Campaña duplicada (mismo campana_id). Verificar: segundo evento descartado por Redis."
+    },
+    "notes": "Este workflow necesita una UI de campañas en el dashboard del admin (actualmente no existe). La UI debe permitir crear, activar y monitorear campañas, y el microservicio Campañas debe publicar campana.activada al activar."
+  },
+  {
+    "id": "admin-alert",
+    "title": "Alerta Administrativa",
+    "case_use": "Eventos críticos del sistema (pedidos fallidos, fraude detectado, stock agotado, errores de servicios) disparan alertas inmediatas al equipo administrador.",
+    "producer_microservice": "Varios (Pedidos, Inventario, Entregas, Usuarios)",
+    "consumers_microservices": ["n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "expected_payload_fields": [
+        "tipo",
+        "severidad",
+        "datos",
+        "trace_id",
+        "origen_servicio"
+      ]
+    },
+    "context": "Múltiples servicios y workflows publican notificaciones de tipo administrativo. Este workflow filtra las de severidad alta/crítica y las enruta al equipo admin por canales de urgencia (Slack, email admin, WhatsApp admin).",
+    "objective": "Garantizar que alertas críticas lleguen al equipo administrador en menos de 60 segundos, con contexto suficiente para actuar.",
+    "preconditions": [
+      "Topic notification.request recibe eventos con campo tipo que incluye: 'alerta_stock', 'order_failed', 'fraud_detected', 'service_error'",
+      "Canal de Slack admin configurado ({{SLACK_CREDENTIAL}})",
+      "Email admin configurado ({{ADMIN_EMAIL}})"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir notificaciones",
+        "node_type": "Kafka Trigger",
+        "description": "Topic {{NOTIFICATION_REQUEST_TOPIC|notification.request}}, consumer group {{N8N_CONSUMER_GROUP|n8n-admin-alert}}."
+      },
+      {
+        "step": 2,
+        "name": "Filtrar solo alertas admin",
+        "node_type": "If",
+        "description": "Verificar que tipo está en ['alerta_stock', 'order_failed', 'fraud_detected', 'service_error', 'payment_failed']. Si no, descartar."
+      },
+      {
+        "step": 3,
+        "name": "Clasificar severidad",
+        "node_type": "Switch",
+        "description": "Switch por severidad: 'critica' (fraud, service_error) → Slack + email + WhatsApp. 'alta' (order_failed, payment_failed) → Slack + email. 'media' (alerta_stock) → solo email."
+      },
+      {
+        "step": 4,
+        "name": "Formatear mensaje de alerta",
+        "node_type": "Function",
+        "description": "Crear mensaje formateado con: timestamp, servicio origen, tipo, severidad, datos relevantes, trace_id, enlace al dashboard, acciones sugeridas."
+      },
+      {
+        "step": 5,
+        "name": "Enviar a Slack (si severidad >= alta)",
+        "node_type": "Slack",
+        "description": "POST a canal {{SLACK_ADMIN_CHANNEL|#mon-amour-alerts}} con bloque formateado. Credencial: {{SLACK_CREDENTIAL}}.",
+        "retries": 2,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 6,
+        "name": "Enviar email al admin",
+        "node_type": "SMTP",
+        "description": "Email a {{ADMIN_EMAIL}} con asunto '[ALERTA {severidad}] {tipo} - Mon Amour Studio'. Credencial: {{SMTP_CREDENTIAL}}.",
+        "retries": 2,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 7,
+        "name": "Enviar WhatsApp al admin (solo críticas)",
+        "node_type": "HTTP Request",
+        "description": "Si severidad=='critica', POST a {{WHATSAPP_API_ENDPOINT}} con mensaje de texto al {{ADMIN_PHONE}}.",
+        "endpoint_placeholder": "{{WHATSAPP_API_ENDPOINT}}",
+        "method": "POST",
+        "retries": 1,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 15
+      },
+      {
+        "step": 8,
+        "name": "Registrar alerta en audit.log",
+        "node_type": "Kafka",
+        "description": "Publicar a {{AUDIT_LOG_TOPIC|audit.log}} con {accion: 'alerta_admin_enviada', tipo, severidad, canales, trace_id}."
+      }
+    ],
+    "outputs": [
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "trace_id + tipo como clave en Redis, TTL 1h (alertas pueden repetirse por distintos motivos).",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "trace_id + tipo"
+    },
+    "retries": {
+      "max_attempts": 2,
+      "backoff_strategy": "linear (3s, 6s)",
+      "jitter": false
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_ADMIN_ALERT_TOPIC|dead-letter.admin-alert}}",
+      "on_failure_publish": true,
+      "metadata": ["tipo", "severidad", "error_message", "trace_id", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.admin_alert.duration_ms", "workflow.admin_alert.success_count", "workflow.admin_alert.failure_count", "workflow.admin_alert.alerts_by_severity"],
+      "trace_fields": ["trace_id", "tipo", "severidad", "origen_servicio"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{SLACK_CREDENTIAL}}", "{{SMTP_CREDENTIAL}}", "{{WHATSAPP_API_CREDENTIAL}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "OAuth2 para Slack, SMTP auth para email, Bearer para WhatsApp API."
+    },
+    "tests": {
+      "happy_path": "Publicar notificación tipo='order_failed', severidad='alta'. Verificar: mensaje en Slack y email admin recibidos.",
+      "failure_case_1": "Slack API caída. Verificar: email aún enviado (canales independientes), error de Slack registrado en audit.log.",
+      "failure_case_2": "Tipo desconocido (tipo='unknown'). Verificar: mensaje descartado en paso 2, sin alertas enviadas."
+    },
+    "notes": "Este workflow comparte el topic notification.request con el notification-dispatcher. Usa consumer groups distintos para que ambos reciban los mismos mensajes. Admin-alert filtra solo los tipos administrativos."
+  },
+  {
+    "id": "retry-dlq-handler",
+    "title": "Retry y DLQ Handler",
+    "case_use": "Monitorear todos los topics de dead-letter-queue, intentar reprocesar mensajes fallidos y escalar a operaciones si persisten.",
+    "producer_microservice": "Varios (todos los workflows que publican a DLQ)",
+    "consumers_microservices": ["n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{DLQ_WILDCARD_TOPIC|dead-letter.*}}",
+      "expected_payload_fields": [
+        "original_topic",
+        "original_event",
+        "error_message",
+        "trace_id",
+        "correlation_id",
+        "attempt_count",
+        "failed_step",
+        "timestamp"
+      ]
+    },
+    "context": "Todos los workflows publican mensajes fallidos a topics dead-letter.* (ej: dead-letter.order-orchestration, dead-letter.payment-confirmation). Este workflow centraliza el reprocesamiento y escalamiento de DLQ.",
+    "objective": "Intentar reprocesar mensajes de DLQ automáticamente (hasta un máximo), escalar a operaciones si no se resuelve, y mantener visibilidad total de mensajes no procesados.",
+    "preconditions": [
+      "Topics dead-letter.* existen (auto-create habilitado en Kafka)",
+      "Redis para tracking de reintentos DLQ",
+      "Canal de alertas admin configurado"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir mensaje DLQ",
+        "node_type": "Kafka Trigger",
+        "description": "Suscribirse a topics: dead-letter.order-orchestration, dead-letter.payment-confirmation, dead-letter.stock-compensation, dead-letter.shipment-scheduling, dead-letter.notification-dispatcher, dead-letter.campaign-activation, dead-letter.admin-alert. Consumer group: {{N8N_CONSUMER_GROUP|n8n-dlq-handler}}. NOTA: Kafka no soporta wildcard nativo; usar múltiples Kafka Trigger nodes o un regex subscriber."
+      },
+      {
+        "step": 2,
+        "name": "Extraer metadata del mensaje DLQ",
+        "node_type": "Set",
+        "description": "Extraer: original_topic, original_event, error_message, attempt_count, trace_id, failed_step, timestamp."
+      },
+      {
+        "step": 3,
+        "name": "Verificar contador de reintentos DLQ",
+        "node_type": "Redis",
+        "description": "Clave dlq-retry:{trace_id}:{original_topic}. Incrementar contador. Si > {{DLQ_MAX_RETRIES|3}}, ir a paso 6 (escalamiento)."
+      },
+      {
+        "step": 4,
+        "name": "Evaluar si es reintentable",
+        "node_type": "Switch",
+        "description": "Clasificar error: 'transient' (timeout, 503, connection) → reintentar. 'permanent' (400, 404, schema_error) → escalar. 'unknown' → reintentar 1 vez."
+      },
+      {
+        "step": 5,
+        "name": "Republicar al topic original",
+        "node_type": "Kafka",
+        "description": "Si reintentable y dentro del límite, publicar el mensaje original al topic original (original_topic) con attempt_count incrementado. Esperar {{DLQ_RETRY_DELAY_SECONDS|60}} segundos antes de republicar."
+      },
+      {
+        "step": 6,
+        "name": "Escalar a operaciones",
+        "node_type": "Kafka",
+        "description": "Publicar a {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con {tipo: 'dlq_escalation', severidad: 'critica', datos: {original_topic, error_message, attempt_count, trace_id}}."
+      },
+      {
+        "step": 7,
+        "name": "Registrar en audit.log",
+        "node_type": "Kafka",
+        "description": "Publicar a {{AUDIT_LOG_TOPIC|audit.log}} con {accion: 'dlq_processed', original_topic, accion_tomada: 'retry'|'escalated', attempt_count, trace_id}."
+      }
+    ],
+    "outputs": [
+      "Republica al topic original (dinámico)",
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "Contador en Redis por trace_id:topic. Si ya se procesó este reintento exacto (attempt_count), skip.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "trace_id + original_topic + attempt_count"
+    },
+    "retries": {
+      "max_attempts": 1,
+      "backoff_strategy": "Sin backoff interno (el backoff se aplica via Wait node antes de republicar)",
+      "jitter": false
+    },
+    "dlq": {
+      "topic_placeholder": "No aplica (este ES el handler de DLQ). Si falla, escalar directamente a Slack/email.",
+      "on_failure_publish": false,
+      "metadata": ["original_topic", "trace_id", "error_message"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.dlq_handler.messages_processed", "workflow.dlq_handler.retried_count", "workflow.dlq_handler.escalated_count", "workflow.dlq_handler.duration_ms"],
+      "trace_fields": ["trace_id", "original_topic", "attempt_count"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{REDIS_CREDENTIAL}}", "{{SLACK_CREDENTIAL}}", "{{SMTP_CREDENTIAL}}"],
+      "auth_type": "Redis auth, credenciales de notificación para escalamiento."
+    },
+    "tests": {
+      "happy_path": "Publicar mensaje a dead-letter.order-orchestration con error transitorio (503). Verificar: mensaje republicado a order.created con attempt_count+1.",
+      "failure_case_1": "Mensaje con attempt_count >= DLQ_MAX_RETRIES. Verificar: NO se republica, se escala a Slack/email admin.",
+      "failure_case_2": "Error permanente (400 bad request). Verificar: mensaje escalado directamente sin reintento, audit.log registra 'error_permanente'."
+    },
+    "notes": "Para DLQ en Kafka sin wildcard nativo, se pueden crear múltiples Kafka Trigger nodes (uno por topic DLQ) y conectarlos al mismo flujo de procesamiento. Alternativa: usar un topic único 'dead-letter' con campo 'source_workflow' para diferenciar."
+  },
+  {
+    "id": "nightly-data-sync",
+    "title": "Snapshot / Data Sync Nocturno",
+    "case_use": "Todas las noches se ejecuta una sincronización de datos: snapshot de inventario, resumen de pedidos del día, verificación de integridad y generación de reportes.",
+    "producer_microservice": "n8n (Cron)",
+    "consumers_microservices": ["Inventario", "Pedidos", "Entregas", "Campañas"],
+    "trigger": {
+      "type": "cron",
+      "topic_or_endpoint_placeholder": "{{NIGHTLY_SYNC_CRON|0 2 * * *}}",
+      "expected_payload_fields": []
+    },
+    "context": "Workflow programado por cron a las 02:00 AM ({{NIGHTLY_SYNC_TIMEZONE|America/Guayaquil}}). Ejecuta consultas a todos los microservicios para generar snapshots de estado, verificar consistencia de datos y producir reportes diarios.",
+    "objective": "Mantener snapshots de datos actualizados, detectar inconsistencias entre servicios (ej: pedidos confirmados sin entrega) y generar reportes diarios de operación.",
+    "preconditions": [
+      "Todos los microservicios activos y accesibles vía HTTP",
+      "MinIO disponible para almacenar snapshots",
+      "Credenciales de todos los servicios configuradas"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Trigger cron nocturno",
+        "node_type": "Cron",
+        "description": "Ejecutar a las {{NIGHTLY_SYNC_CRON|0 2 * * *}} (02:00 AM) en zona horaria {{NIGHTLY_SYNC_TIMEZONE|America/Guayaquil}}."
+      },
+      {
+        "step": 2,
+        "name": "Generar trace_id de ejecución",
+        "node_type": "Set",
+        "description": "trace_id = UUID v4 con prefijo 'nightly-'. correlation_id = fecha YYYY-MM-DD."
+      },
+      {
+        "step": 3,
+        "name": "Snapshot de inventario",
+        "node_type": "HTTP Request",
+        "description": "GET {{INVENTORY_LIST_ENDPOINT|/api/inventory/}} para obtener todos los productos con disponibilidad actual.",
+        "endpoint_placeholder": "{{INVENTORY_LIST_ENDPOINT|/api/inventory/}}",
+        "method": "GET",
+        "retries": 3,
+        "retry_backoff_seconds": 10,
+        "timeout_seconds": 60
+      },
+      {
+        "step": 4,
+        "name": "Snapshot de pedidos del día",
+        "node_type": "HTTP Request",
+        "description": "GET {{ORDERS_LIST_ENDPOINT|/api/orders/}} filtrando por fecha del día anterior.",
+        "endpoint_placeholder": "{{ORDERS_LIST_ENDPOINT|/api/orders/}}",
+        "method": "GET",
+        "retries": 3,
+        "retry_backoff_seconds": 10,
+        "timeout_seconds": 60
+      },
+      {
+        "step": 5,
+        "name": "Snapshot de entregas",
+        "node_type": "HTTP Request",
+        "description": "GET {{DELIVERIES_LIST_ENDPOINT|/api/deliveries/}} para obtener estado de todas las entregas en curso.",
+        "endpoint_placeholder": "{{DELIVERIES_LIST_ENDPOINT|/api/deliveries/}}",
+        "method": "GET",
+        "retries": 3,
+        "retry_backoff_seconds": 10,
+        "timeout_seconds": 60
+      },
+      {
+        "step": 6,
+        "name": "Verificar consistencia inter-servicios",
+        "node_type": "Function",
+        "description": "Comparar: 1) Pedidos confirmados sin entrega asociada. 2) Stock reservado sin pedido activo. 3) Entregas sin pedido fuente. Generar lista de inconsistencias."
+      },
+      {
+        "step": 7,
+        "name": "Almacenar snapshot en MinIO",
+        "node_type": "HTTP Request",
+        "description": "PUT snapshots en {{MINIO_ENDPOINT|/storage/campaigns/}}/snapshots/{fecha}/ como archivos JSON.",
+        "endpoint_placeholder": "{{MINIO_ENDPOINT|/storage/campaigns/snapshots/}}",
+        "method": "PUT",
+        "retries": 2,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 30
+      },
+      {
+        "step": 8,
+        "name": "Generar resumen diario",
+        "node_type": "Function",
+        "description": "Calcular: total_pedidos, total_ingresos, pedidos_pendientes, entregas_completadas, stock_bajo, inconsistencias encontradas."
+      },
+      {
+        "step": 9,
+        "name": "Enviar reporte al admin",
+        "node_type": "Kafka",
+        "description": "Publicar a {{NOTIFICATION_REQUEST_TOPIC|notification.request}} con {tipo: 'reporte_diario', canal: 'email', destinatario: {{ADMIN_EMAIL}}, datos: resumen_diario}."
+      },
+      {
+        "step": 10,
+        "name": "Alertar inconsistencias",
+        "node_type": "If",
+        "description": "Si hay inconsistencias, publicar alerta tipo='data_inconsistency' a notification.request con severidad='alta'."
+      }
+    ],
+    "outputs": [
+      "{{NOTIFICATION_REQUEST_TOPIC|notification.request}}",
+      "{{AUDIT_LOG_TOPIC|audit.log}}"
+    ],
+    "idempotency": {
+      "strategy": "Clave nightly-sync:{fecha_YYYY-MM-DD} en Redis, TTL 25h. Evita ejecución doble si cron se dispara dos veces.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "fecha_ejecucion"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential (10s, 20s, 40s) — tolerante porque es batch nocturno",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_NIGHTLY_SYNC_TOPIC|dead-letter.nightly-data-sync}}",
+      "on_failure_publish": true,
+      "metadata": ["fecha_ejecucion", "paso_fallido", "error_message", "trace_id", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.nightly_sync.duration_ms", "workflow.nightly_sync.success_count", "workflow.nightly_sync.failure_count", "nightly.total_pedidos", "nightly.total_ingresos", "nightly.inconsistencias_count"],
+      "trace_fields": ["trace_id", "fecha_ejecucion"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{INVENTORY_API_KEY}}", "{{ORDERS_API_KEY}}", "{{DELIVERIES_API_KEY}}", "{{MINIO_CREDENTIAL}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "Bearer Token para APIs. Credenciales MinIO para almacenamiento."
+    },
+    "tests": {
+      "happy_path": "Ejecutar cron a las 02:00. Verificar: snapshots JSON en MinIO, reporte email al admin, audit.log con métricas.",
+      "failure_case_1": "Inventario API caída. Verificar: snapshot parcial (sin inventario), alerta de error, reintento del paso fallido.",
+      "failure_case_2": "MinIO no disponible. Verificar: snapshots generados pero no almacenados, alerta al admin, datos en DLQ para reprocesar."
+    },
+    "notes": "La hora del cron debe ajustarse a la zona horaria del negocio. El snapshot se almacena como JSON en MinIO para consulta histórica. Los reportes usan el mismo notification-dispatcher para envío."
+  },
+  {
+    "id": "audit-trace-export",
+    "title": "Audit & Trace Export",
+    "case_use": "Recopilar todos los eventos de auditoría generados por los microservicios, enriquecerlos y exportarlos a almacenamiento persistente para compliance y análisis.",
+    "producer_microservice": "Todos los microservicios",
+    "consumers_microservices": ["n8n"],
+    "trigger": {
+      "type": "kafka",
+      "topic_or_endpoint_placeholder": "{{AUDIT_LOG_TOPIC|audit.log}}",
+      "expected_payload_fields": [
+        "accion",
+        "servicio_origen",
+        "trace_id",
+        "correlation_id",
+        "timestamp",
+        "datos"
+      ]
+    },
+    "context": "Todos los workflows y microservicios publican eventos de auditoría al topic audit.log. Este workflow los consume, enriquece con metadata adicional, y los exporta a almacenamiento persistente (MinIO/S3) y opcionalmente a un sistema de observabilidad (Jaeger/Grafana).",
+    "objective": "Mantener registro de auditoría completo y persistente de todas las operaciones del sistema, cumpliendo con requisitos de trazabilidad y compliance.",
+    "preconditions": [
+      "Topic audit.log recibe eventos de todos los servicios",
+      "MinIO disponible para almacenamiento de largo plazo",
+      "Jaeger/OTLP endpoint configurado para traces"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "name": "Consumir evento de auditoría",
+        "node_type": "Kafka Trigger",
+        "description": "Topic {{AUDIT_LOG_TOPIC|audit.log}}, consumer group {{N8N_CONSUMER_GROUP|n8n-audit-export}}. Batch mode: procesar hasta 100 mensajes por lote para eficiencia."
+      },
+      {
+        "step": 2,
+        "name": "Enriquecer con metadata",
+        "node_type": "Function",
+        "description": "Agregar: fecha_procesamiento, environment ({{ENVIRONMENT|production}}), version_schema, hash del evento para integridad."
+      },
+      {
+        "step": 3,
+        "name": "Agrupar por servicio y hora",
+        "node_type": "Function",
+        "description": "Agrupar eventos por servicio_origen y hora para crear archivos de log organizados."
+      },
+      {
+        "step": 4,
+        "name": "Exportar a MinIO (almacenamiento persistente)",
+        "node_type": "HTTP Request",
+        "description": "PUT a {{MINIO_AUDIT_PATH|/storage/campaigns/audit/}}{servicio}/{fecha}/{hora}.jsonl con los eventos del lote en formato JSON Lines.",
+        "endpoint_placeholder": "{{MINIO_AUDIT_PATH|/storage/campaigns/audit/}}",
+        "method": "PUT",
+        "retries": 3,
+        "retry_backoff_seconds": 5,
+        "timeout_seconds": 30
+      },
+      {
+        "step": 5,
+        "name": "Enviar traces a Jaeger (opcional)",
+        "node_type": "HTTP Request",
+        "description": "POST a {{OTLP_HTTP_ENDPOINT|http://jaeger:4318/v1/traces}} con spans construidos a partir de los eventos de auditoría.",
+        "endpoint_placeholder": "{{OTLP_HTTP_ENDPOINT|http://jaeger:4318/v1/traces}}",
+        "method": "POST",
+        "retries": 1,
+        "retry_backoff_seconds": 3,
+        "timeout_seconds": 10
+      },
+      {
+        "step": 6,
+        "name": "Emitir métricas de auditoría",
+        "node_type": "Function",
+        "description": "Contabilizar: eventos_por_servicio, eventos_por_accion, latencia_promedio de procesamiento."
+      }
+    ],
+    "outputs": [],
+    "idempotency": {
+      "strategy": "Hash del contenido del batch. Si un batch idéntico ya fue procesado, skip. Almacenar en Redis con TTL 6h.",
+      "storage": "{{REDIS_URL|redis://redis:6379/0}}",
+      "dedup_field": "batch_hash"
+    },
+    "retries": {
+      "max_attempts": 3,
+      "backoff_strategy": "exponential (5s, 10s, 20s)",
+      "jitter": true
+    },
+    "dlq": {
+      "topic_placeholder": "{{DLQ_AUDIT_TOPIC|dead-letter.audit-trace-export}}",
+      "on_failure_publish": true,
+      "metadata": ["batch_size", "servicios_incluidos", "error_message", "trace_id", "timestamp"]
+    },
+    "observability": {
+      "emit_metrics": ["workflow.audit_export.duration_ms", "workflow.audit_export.events_processed", "workflow.audit_export.batches_exported", "workflow.audit_export.failure_count"],
+      "trace_fields": ["trace_id", "batch_id", "servicio_origen"]
+    },
+    "security": {
+      "credentials_placeholders": ["{{MINIO_CREDENTIAL}}", "{{REDIS_CREDENTIAL}}"],
+      "auth_type": "MinIO access key/secret. No auth para OTLP interno."
+    },
+    "tests": {
+      "happy_path": "Publicar 50 eventos audit.log de distintos servicios. Verificar: archivos JSONL creados en MinIO agrupados por servicio/hora, traces en Jaeger.",
+      "failure_case_1": "MinIO caído. Verificar: batch completo enviado a DLQ, alerta admin, reintento en siguiente batch del DLQ handler.",
+      "failure_case_2": "Evento malformado (sin accion). Verificar: evento descartado con log de warning, demás eventos del batch procesados normalmente."
+    },
+    "notes": "El batch processing es importante aquí para evitar una escritura a MinIO por cada evento. Se recomienda procesar lotes de 100 eventos o cada 60 segundos (lo que ocurra primero). Los archivos JSONL facilitan posterior análisis con herramientas como Apache Spark o simple grep."
+  }
+]

@@ -31,6 +31,10 @@ import type {
   PagoResponse,
   EntregaResponse,
   CampanaResponse,
+  CampanaCreate,
+  CampanaUpdate,
+  PublicacionCreate,
+  PublicacionResponse,
   EstadoUpdate,
   TipoProductoResponse,
   TipoProductoCreate,
@@ -46,6 +50,12 @@ import type {
   ResenaResponse,
   ConfiguracionTiendaUpdate,
   ConfiguracionTiendaResponse,
+  WorkflowCreate,
+  WorkflowUpdate,
+  WorkflowResponse,
+  NotificationPreferenceCreate,
+  NotificationPreferenceUpdate,
+  NotificationPreferenceResponse,
 } from "./types"
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -498,6 +508,166 @@ export const campaignsApi = {
 
   get(campanaId: string) {
     return request<CampanaResponse>(`/api/campaigns/${campanaId}`)
+  },
+
+  create(data: CampanaCreate) {
+    return request<CampanaResponse>("/api/campaigns/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+
+  update(campanaId: string, data: CampanaUpdate) {
+    return request<CampanaResponse>(`/api/campaigns/${campanaId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  },
+
+  activate(campanaId: string) {
+    return request<CampanaResponse>(`/api/campaigns/${campanaId}/activar`, {
+      method: "POST",
+    })
+  },
+
+  delete(campanaId: string) {
+    return request<void>(`/api/campaigns/${campanaId}`, { method: "DELETE" })
+  },
+}
+
+/* ── Publicaciones ───────────────────────────────────────── */
+
+export const publicationsApi = {
+  listByCampaign(campanaId: string) {
+    return request<PublicacionResponse[]>(`/api/publications/campana/${campanaId}`)
+  },
+
+  create(data: PublicacionCreate) {
+    return request<PublicacionResponse>("/api/publications/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+
+  publish(pubId: string) {
+    return request<PublicacionResponse>(`/api/publications/${pubId}/publicar`, {
+      method: "POST",
+    })
+  },
+
+  schedule(pubId: string, scheduled_at: string) {
+    return request<PublicacionResponse>(`/api/publications/${pubId}/programar`, {
+      method: "POST",
+      body: JSON.stringify({ scheduled_at }),
+    })
+  },
+
+  delete(pubId: string) {
+    return request<void>(`/api/publications/${pubId}`, { method: "DELETE" })
+  },
+
+  async uploadMedia(file: File): Promise<{ url: string; object_name: string }> {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const token = getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers["Authorization"] = `Bearer ${token}`
+
+    const res = await fetch("/api/publications/upload", {
+      method: "POST",
+      headers,
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, body.detail ?? res.statusText)
+    }
+
+    return res.json()
+  },
+}
+
+/* ── n8n Orchestrator ────────────────────────────────────── */
+
+export const orchestratorApi = {
+  // Workflow registry
+  listWorkflows() {
+    return request<WorkflowResponse[]>("/api/orchestrator/workflows/")
+  },
+
+  createWorkflow(data: WorkflowCreate) {
+    return request<WorkflowResponse>("/api/orchestrator/workflows/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+
+  updateWorkflow(wfId: string, data: WorkflowUpdate) {
+    return request<WorkflowResponse>(`/api/orchestrator/workflows/${wfId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteWorkflow(wfId: string) {
+    return request<void>(`/api/orchestrator/workflows/${wfId}`, { method: "DELETE" })
+  },
+
+  triggerWorkflow(event_type: string, payload: Record<string, unknown> = {}) {
+    return request<{ triggered: number; results: unknown[] }>("/api/orchestrator/workflows/trigger", {
+      method: "POST",
+      body: JSON.stringify({ event_type, payload }),
+    })
+  },
+
+  // n8n proxy
+  n8nListWorkflows() {
+    return request<unknown[]>("/api/orchestrator/workflows/n8n/list")
+  },
+
+  n8nActivateWorkflow(workflowId: string) {
+    return request<unknown>(`/api/orchestrator/workflows/n8n/${workflowId}/activate`, {
+      method: "POST",
+    })
+  },
+
+  n8nDeactivateWorkflow(workflowId: string) {
+    return request<unknown>(`/api/orchestrator/workflows/n8n/${workflowId}/deactivate`, {
+      method: "POST",
+    })
+  },
+
+  n8nListExecutions(workflowId?: string, status?: string, limit = 20) {
+    const qs = new URLSearchParams()
+    if (workflowId) qs.set("workflowId", workflowId)
+    if (status) qs.set("status", status)
+    qs.set("limit", String(limit))
+    return request<unknown[]>(`/api/orchestrator/workflows/n8n/executions/list?${qs}`)
+  },
+
+  // Notification preferences
+  listPreferences() {
+    return request<NotificationPreferenceResponse[]>("/api/orchestrator/notifications/preferences")
+  },
+
+  createPreference(data: NotificationPreferenceCreate) {
+    return request<NotificationPreferenceResponse>("/api/orchestrator/notifications/preferences", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  },
+
+  updatePreference(prefId: string, data: NotificationPreferenceUpdate) {
+    return request<NotificationPreferenceResponse>(`/api/orchestrator/notifications/preferences/${prefId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  },
+
+  deletePreference(prefId: string) {
+    return request<void>(`/api/orchestrator/notifications/preferences/${prefId}`, { method: "DELETE" })
   },
 }
 

@@ -60,3 +60,12 @@ class PublicacionRepository:
             await db.flush()
             return await self.get_by_id(db, pub_id)
         return None
+
+    # ── Delete ─────────────────────────────────────────────────────────────
+
+    async def delete(self, db: AsyncSession, pub_id: uuid.UUID) -> bool:
+        from sqlalchemy import delete as sa_delete
+        result = await db.execute(
+            sa_delete(Publicacion).where(Publicacion.id == pub_id)
+        )
+        return result.rowcount > 0

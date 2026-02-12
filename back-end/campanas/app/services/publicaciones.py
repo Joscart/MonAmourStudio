@@ -109,3 +109,13 @@ class PublicacionService:
             logger.warning("Failed to publish publicacion.programada event: %s", exc)
 
         return updated
+
+    # ── Delete ─────────────────────────────────────────────────────────────────
+
+    async def delete(
+        self, db: AsyncSession, pub_id: uuid.UUID
+    ) -> bool:
+        deleted = await self.repo.delete(db, pub_id)
+        if deleted:
+            logger.info("Publication deleted: %s", pub_id)
+        return deleted

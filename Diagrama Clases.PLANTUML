@@ -1,11 +1,15 @@
-@startuml
-title Diagrama de Clases: E-Commerce Mon Amour Studio\n(Refleja implementación real del monorepo)
+﻿@startuml
+title Diagrama de Clases: E-Commerce Mon Amour Studio\n(Refleja implementación real del monorepo – 22 entidades · 6 microservicios)
 
 skinparam classAttributeIconSize 0
 skinparam Shadowing false
+skinparam defaultFontSize 11
+skinparam packageStyle rectangle
 
-' ── Infraestructura de eventos ─────────────────────────────────
-package "Infraestructura Eventos" {
+' ══════════════════════════════════════════════════════════════
+'  Infraestructura de Eventos (Kafka)
+' ══════════════════════════════════════════════════════════════
+package "Infraestructura Eventos (Kafka KRaft)" #TECHNOLOGY {
   class KafkaEventProducer {
     - bootstrap_servers: string
     - producer: AIOKafkaProducer
@@ -25,31 +29,64 @@ package "Infraestructura Eventos" {
   }
 }
 
-' ── Microservicio Usuarios ─────────────────────────────────────
-package "Microservicio Usuarios" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio Usuarios
+' ══════════════════════════════════════════════════════════════
+package "Microservicio Usuarios" #LightBlue {
   class Usuario <<Entity>> {
     - id: UUID
-    - nombre: string
-    - email: string (unique)
-    - password_hash: string
-    - rol: string = "cliente"
-    - created_at: DateTime
+    - nombre: String(120)
+    - email: String(255) «unique»
+    - password_hash: Text
+    - rol: String(30) = "cliente"
+    - telefono: String(30)?
+    - foto_url: String(500)?
+    - created_at: DateTime(tz)
+  }
+
+  class Direccion <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID «FK»
+    - etiqueta: String(60) = "Casa"
+    - linea1: String(255)
+    - linea2: String(255)?
+    - ciudad: String(120)
+    - provincia: String(120)
+    - codigo_postal: String(20)
+    - pais: String(60) = "Ecuador"
+    - es_principal: Boolean = false
+    - created_at: DateTime(tz)
+  }
+
+  class MetodoPago <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID «FK»
+    - tipo: String(30) = "Visa"
+    - ultimos_4: String(4)
+    - titular: String(120)
+    - expiracion: String(7)
+    - es_principal: Boolean = false
+    - created_at: DateTime(tz)
   }
 
   class Sesion <<Entity>> {
     - id: UUID
-    - usuario_id: UUID (FK)
-    - token: string
-    - expira: DateTime
-    - created_at: DateTime
+    - usuario_id: UUID «FK»
+    - token: Text
+    - expira: DateTime(tz)
+    - created_at: DateTime(tz)
   }
 
   class UsuarioService <<Service>> {
-    + register(db, data: UsuarioCreate): Usuario
+    + register(db, data): Usuario
     + authenticate(db, email, password): TokenResponse
+    + google_auth(db, token): TokenResponse
     + get_by_id(db, user_id): Usuario
     + update_profile(db, user_id, data): Usuario
+    + change_password(db, user_id, data): void
+    + upload_avatar(db, user_id, file): Usuario
     + list_users(db): list[Usuario]
+    + update_role(db, user_id, role): Usuario
     + delete_user(db, user_id): void
   }
 
@@ -65,54 +102,114 @@ package "Microservicio Usuarios" {
   class UsuariosController <<Controller>> {
     + POST /register
     + POST /login
+    + POST /google-login
     + GET /me
     + PUT /me
+    + PUT /me/password
+    + POST /me/avatar
     + GET /
+    + PUT /{user_id}/role
     + DELETE /{user_id}
   }
 }
 
-' ── Microservicio Inventario ───────────────────────────────────
-package "Microservicio Inventario" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio Inventario
+' ══════════════════════════════════════════════════════════════
+package "Microservicio Inventario" #LightGreen {
+  class TipoProducto <<Entity>> {
+    - id: UUID
+    - nombre: String(120) «unique»
+    - created_at: DateTime(tz)
+  }
+
+  class Garantia <<Entity>> {
+    - id: UUID
+    - nombre: String(120) «unique»
+    - dias: Integer
+    - created_at: DateTime(tz)
+  }
+
+  class Empaque <<Entity>> {
+    - id: UUID
+    - nombre: String(120) «unique»
+    - created_at: DateTime(tz)
+  }
+
+  class Descuento <<Entity>> {
+    - id: UUID
+    - nombre: String(120) «unique»
+    - porcentaje: Float (0-100)
+    - created_at: DateTime(tz)
+  }
+
   class Producto <<Entity>> {
     - id: UUID
-    - sku: string (unique)
-    - nombre: string
-    - descripcion: text
-    - precio: Decimal(10,2)
-    - moneda: string = "USD"
-    - stock: int = 0
-    - imagen_url: string?
-    - created_at: DateTime
-    - updated_at: DateTime
+    - sku: String(80) «unique»
+    - nombre: String(255)
+    - descripcion: Text?
+    - precio: Numeric(10,2)
+    - moneda: String(10) = "USD"
+    - disponibilidad: Integer = 0
+    - max_por_pedido: Integer = 1
+    - imagen_url: String(500)?
+    - imagen_preview_url: String(500)?
+    - envio_gratis_umbral: Numeric(10,2)?
+    - calificacion_promedio: Float = 0.0
+    - total_resenas: Integer = 0
+    - tipo_producto_id: UUID? «FK»
+    - garantia_id: UUID? «FK»
+    - empaque_id: UUID? «FK»
+    - descuento_id: UUID? «FK»
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
+  }
+
+  class Resena <<Entity>> {
+    - id: UUID
+    - producto_id: UUID «FK»
+    - usuario_id: UUID
+    - usuario_nombre: String(255)
+    - calificacion: Integer (1-5)
+    - comentario: Text?
+    - created_at: DateTime(tz)
+  }
+
+  class Talla <<Entity>> {
+    - id: UUID
+    - producto_id: UUID «FK»
+    - nombre: String(20)
+    - ancho_cm: Float
+    - alto_cm: Float
+    - precio_adicional: Numeric(10,2) = 0
+  }
+
+  class Favorito <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID
+    - producto_id: UUID «FK»
+    - created_at: DateTime(tz)
+    .. unique(usuario_id, producto_id) ..
   }
 
   class ReglaDisponibilidad <<Entity>> {
     - id: UUID
-    - producto_id: UUID (FK)
-    - tipo: string
-    - limite_por_pedido: int
-    - ventana_inicio: DateTime?
-    - ventana_fin: DateTime?
+    - producto_id: UUID «FK»
+    - tipo: String(50)
+    - limite_por_pedido: Integer = 1
+    - ventana_inicio: DateTime(tz)?
+    - ventana_fin: DateTime(tz)?
   }
 
   class InventarioService <<Service>> {
     + list_products(db, filters): list[Producto]
-    + get_product(db, product_id): Producto
+    + get_product(db, id): Producto
     + create_product(db, data): Producto
-    + update_product(db, product_id, data): Producto
-    + delete_product(db, product_id): void
-    + reserve_stock(db, product_id, cantidad, pedido_id): void
-    + release_stock(db, product_id, cantidad, pedido_id): void
-  }
-
-  class InventarioRepository <<Repository>> {
-    + create(db, producto): Producto
-    + get_by_id(db, id): Producto?
-    + list_all(db, filters): list[Producto]
-    + update(db, id, data): void
-    + delete(db, id): void
-    + update_stock(db, id, delta): void
+    + update_product(db, id, data): Producto
+    + delete_product(db, id): void
+    + reserve_stock(db, id, cant, pedido_id): void
+    + release_stock(db, id, cant, pedido_id): void
+    + upload_image(db, id, file): Producto
   }
 
   class InventarioController <<Controller>> {
@@ -123,41 +220,48 @@ package "Microservicio Inventario" {
     + DELETE /productos/{id}
     + POST /productos/{id}/reserve
     + POST /productos/{id}/release
+    + POST /productos/{id}/imagen
+    + CRUD /tipos, /garantias, /empaques, /descuentos
+    + GET-POST /productos/{id}/tallas
+    + GET-POST /productos/{id}/resenas
+    + GET-POST-DELETE /favoritos
   }
 }
 
-' ── Microservicio Pedidos ──────────────────────────────────────
-package "Microservicio Pedidos" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio Pedidos
+' ══════════════════════════════════════════════════════════════
+package "Microservicio Pedidos" #LightYellow {
   class Pedido <<Entity>> {
     - id: UUID
     - usuario_id: UUID
-    - fecha_creacion: DateTime
-    - estado: string = "pendiente"
-    - subtotal: Decimal
-    - shipping: Decimal
-    - total: Decimal
-    - direccion_entrega: string
-    - coordenadas_entrega: string?
-    - created_at: DateTime
-    - updated_at: DateTime
+    - fecha_creacion: DateTime(tz)
+    - estado: String(50) = "pendiente"
+    - subtotal: Numeric(12,2)
+    - shipping: Numeric(12,2)
+    - total: Numeric(12,2)
+    - direccion_entrega: String(500)
+    - coordenadas_entrega: String(100)?
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
   }
 
   class PedidoItem <<Entity>> {
     - id: UUID
-    - pedido_id: UUID (FK)
+    - pedido_id: UUID «FK»
     - producto_id: UUID
-    - variante: string?
-    - cantidad: int
-    - precio_unitario: Decimal
+    - variante: String(100)?
+    - cantidad: Integer
+    - precio_unitario: Numeric(12,2)
   }
 
   class PedidoEvento <<Entity>> {
     - id: UUID
-    - pedido_id: UUID (FK)
-    - event_id: string (unique)
-    - evento: string
-    - payload: JSON
-    - created_at: DateTime
+    - pedido_id: UUID «FK»
+    - event_id: String(255) «unique»
+    - evento: String(100)
+    - payload: JSON = {}
+    - created_at: DateTime(tz)
   }
 
   class PedidoService <<Service>> {
@@ -185,28 +289,30 @@ package "Microservicio Pedidos" {
   }
 }
 
-' ── Microservicio Entregas ─────────────────────────────────────
-package "Microservicio Entregas" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio Entregas
+' ══════════════════════════════════════════════════════════════
+package "Microservicio Entregas" #LightCoral {
   class Entrega <<Entity>> {
     - id: UUID
-    - pedido_id: UUID (unique)
-    - estado: string = "programada"
-    - guia: string
-    - fecha_programada: DateTime?
-    - fecha_entrega: DateTime?
-    - direccion: string
-    - notas: text?
-    - created_at: DateTime
-    - updated_at: DateTime
+    - pedido_id: UUID «unique»
+    - estado: String(50) = "programada"
+    - guia: String(100)?
+    - fecha_programada: DateTime(tz)?
+    - fecha_entrega: DateTime(tz)?
+    - direccion: String(500)
+    - notas: Text?
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
   }
 
   class EntregaEvento <<Entity>> {
     - id: UUID
-    - entrega_id: UUID (FK)
-    - event_id: string (unique)
-    - evento: string
-    - payload: JSON
-    - created_at: DateTime
+    - entrega_id: UUID «FK»
+    - event_id: String(255) «unique»
+    - evento: String(100)
+    - payload: JSON = {}
+    - created_at: DateTime(tz)
   }
 
   class EntregaService <<Service>> {
@@ -238,30 +344,50 @@ package "Microservicio Entregas" {
   }
 }
 
-' ── Microservicio Campañas ─────────────────────────────────────
-package "Microservicio Campañas" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio Campañas
+' ══════════════════════════════════════════════════════════════
+package "Microservicio Campañas" #Lavender {
   class Campana <<Entity>> {
     - id: UUID
-    - titulo: string
-    - mensaje_global: text
-    - segmentacion: string?
-    - fecha_inicio: DateTime
-    - fecha_fin: DateTime
-    - activa: boolean = false
-    - created_at: DateTime
-    - updated_at: DateTime
+    - titulo: String(255)
+    - mensaje_global: Text
+    - segmentacion: String(255)?
+    - fecha_inicio: DateTime(tz)
+    - fecha_fin: DateTime(tz)
+    - activa: Boolean = false
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
   }
 
   class Publicacion <<Entity>> {
     - id: UUID
-    - campana_id: UUID (FK)
-    - tipo_media: string
-    - media_url: string?
-    - caption: text
-    - canal: string
-    - scheduled_at: DateTime?
-    - publicada: boolean = false
-    - created_at: DateTime
+    - campana_id: UUID «FK»
+    - tipo_media: String(50)
+    - media_url: String(1024)?
+    - caption: Text
+    - canal: String(100)
+    - scheduled_at: DateTime(tz)?
+    - publicada: Boolean = false
+    - created_at: DateTime(tz)
+  }
+
+  class ConfiguracionTienda <<Entity>> {
+    - id: UUID
+    - logo_url: String(500)?
+    - email_contacto / email_soporte: String(255)?
+    - telefono_contacto / telefono_soporte: String(50)?
+    - envio_gratis_desde: Numeric(10,2)?
+    - costo_envio: Numeric(10,2)?
+    - instagram_url / tiktok_url: String(500)?
+    - whatsapp_url / facebook_url: String(500)?
+    - color_primary_h/s/l: Integer
+    - color_accent_h/s/l: Integer
+    - color_secondary_h/s/l: Integer
+    - atenuacion: Integer = 10
+    - home/login/register/about_image_url: String(500)?
+    - footer_light_text: Boolean = true
+    - created_at / updated_at: DateTime(tz)
   }
 
   class CampanaService <<Service>> {
@@ -278,6 +404,7 @@ package "Microservicio Campañas" {
     + list_by_campaign(db, campana_id): list[Publicacion]
     + publish(db, pub_id): Publicacion
     + schedule(db, pub_id, scheduled_at): Publicacion
+    + delete(db, pub_id): void
   }
 
   class CampanasController <<Controller>> {
@@ -294,65 +421,189 @@ package "Microservicio Campañas" {
     + GET /publicaciones/campana/{id}
     + POST /publicaciones/{id}/publicar
     + POST /publicaciones/{id}/programar
+    + POST /publicaciones/upload
+    + DELETE /publicaciones/{id}
+  }
+
+  class ConfigTiendaController <<Controller>> {
+    + GET /config
+    + PUT /config
+    + POST /config/logo
+    + POST /config/images/{slot}
   }
 }
 
-' ── Frontend (Next.js / React) ─────────────────────────────────
-package "Frontend (Next.js + React + Tailwind)" {
+' ══════════════════════════════════════════════════════════════
+'  Microservicio n8n-Orchestrator
+' ══════════════════════════════════════════════════════════════
+package "Microservicio n8n-Orchestrator" #Wheat {
+  class WorkflowRegistry <<Entity>> {
+    - id: UUID
+    - n8n_workflow_id: String(100)? «unique»
+    - name: String(255)
+    - description: Text?
+    - trigger_event: String(100) «indexed»
+    - webhook_path: String(500)?
+    - active: Boolean = false
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
+  }
+
+  class NotificationPreference <<Entity>> {
+    - id: UUID
+    - usuario_id: UUID «indexed»
+    - nombre_admin: String(255)
+    - canal: String(50)
+    - destino: String(255)
+    - eventos: JSON = []
+    - activo: Boolean = true
+    - created_at: DateTime(tz)
+    - updated_at: DateTime(tz)
+  }
+
+  class N8nClient <<Service>> {
+    - base_url: string
+    - api_key: string
+    - client: httpx.AsyncClient
+    + list_workflows(): list
+    + get_workflow(id): dict
+    + activate_workflow(id): dict
+    + deactivate_workflow(id): dict
+    + trigger_webhook(path, data): dict
+    + list_executions(wf_id?, status?, limit?): list
+    + health(): dict
+  }
+
+  class WorkflowService <<Service>> {
+    + create(db, data): WorkflowRegistry
+    + list(db): list[WorkflowRegistry]
+    + update(db, id, data): WorkflowRegistry
+    + delete(db, id): void
+    + trigger_workflow(db, event, payload): list[result]
+  }
+
+  class NotificationService <<Service>> {
+    + create(db, data): NotificationPreference
+    + list(db): list[NotificationPreference]
+    + update(db, id, data): NotificationPreference
+    + delete(db, id): void
+    + dispatch_notification(db, event, payload): void
+  }
+
+  class OrchestratorController <<Controller>> {
+    + CRUD /workflows
+    + POST /workflows/trigger
+    + GET  /workflows/n8n/list
+    + POST /workflows/n8n/{id}/activate
+    + POST /workflows/n8n/{id}/deactivate
+    + GET  /workflows/n8n/executions/list
+    + CRUD /notifications/preferences
+    + POST /notifications/dispatch
+  }
+
+  class EventHandlers <<Handler>> {
+    + handle_event(event_type, payload): void
+    .. despacha a workflows y notificaciones ..
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+'  n8n (Plataforma de Automatizacion)
+' ══════════════════════════════════════════════════════════════
+package "n8n (Workflow Automation)" #MistyRose {
+  class n8nEngine <<External>> {
+    + REST API v1  (gestionada por N8N_API_KEY)
+    + Webhook endpoints (triggers)
+    + Workflows: notificaciones WhatsApp,
+    ..email, stock alerts, publicaciones..
+    + DB: postgres-n8n
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+'  Frontend (Next.js / React)
+' ══════════════════════════════════════════════════════════════
+package "Frontend (Next.js 14 + React + Tailwind + shadcn/ui)" #AliceBlue {
   class AuthContext <<Context>> {
     + token: string?
     + user: UsuarioResponse?
     + login(email, password): void
+    + googleLogin(credential): void
     + logout(): void
+  }
+
+  class StoreConfigContext <<Context>> {
+    + config: ConfiguracionTiendaResponse?
+    + refresh(): void
   }
 
   class CartState <<State>> {
     + items: CartItem[]
-    + addItem(product, qty): void
+    + addItem(product, qty, variant?): void
     + removeItem(id): void
     + updateQuantity(id, qty): void
     + total: Decimal
   }
 
   class ApiClient <<Service>> {
-    + get(path): Response
-    + post(path, body): Response
-    + put(path, body): Response
-    + delete(path): Response
-    - baseUrl: string = "/api"
+    + usersApi: usuarios CRUD
+    + inventoryApi: productos, tipos, resenas, favoritos
+    + ordersApi: pedidos CRUD + pago
+    + deliveriesApi: entregas CRUD
+    + campaignsApi: campanas CRUD + activar
+    + publicationsApi: publicaciones + upload media
+    + orchestratorApi: workflows + notificaciones
+    + storeConfigApi: configuracion tienda
+    - baseUrl: "/api"
     - authToken: string?
   }
 
   class Pages <<View>> {
-    + HomePage
-    + ProductsPage (catálogo)
-    + ProductDetailPage [id]
+    + HomePage (hero, products, testimonials)
+    + ProductsPage (catalogo con filtros)
+    + ProductDetailPage [id] (resenas, tallas)
     + CartPage
     + PaymentPage (checkout)
     + OrdersPage (historial)
-    + LoginPage
-    + RegisterPage
-    + AccountPage
-    + DashboardPage (admin)
+    + LoginPage / RegisterPage
+    + AccountPage (direcciones, metodos pago)
+    + DashboardPage (admin: 8 secciones)
+  }
+
+  class DashboardSections <<View>> {
+    + Resumen (metricas KPI)
+    + Pedidos (gestion de pedidos)
+    + Productos (CRUD + imagen)
+    + Catalogo (tipos, garantias, empaques, descuentos)
+    + Clientes (roles, listado)
+    + Estadisticas (graficos)
+    + Campanas (CampaignsSection)
+    + Ajustes (configuracion tienda, colores, logo)
   }
 }
 
-' ── Relaciones ─────────────────────────────────────────────────
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Usuarios
+' ══════════════════════════════════════════════════════════════
 Usuario "1" --> "0..*" Sesion : genera
+Usuario "1" --> "0..*" Direccion : tiene
+Usuario "1" --> "0..*" MetodoPago : posee
 Usuario "1" --> "0..*" Pedido : realiza
 
 UsuariosController --> UsuarioService
 UsuarioService --> UsuarioRepository
 UsuarioService --> KafkaEventProducer : publica user.registered
 
-Pedido "1" --> "1..*" PedidoItem : contiene
-Pedido "1" --> "0..*" PedidoEvento : registra
-PedidoItem "0..*" --> "1" Producto : referencia
-
-PedidosController --> PedidoService
-PedidoService --> PedidoRepository
-PedidoService --> KafkaEventProducer : publica order.created, payment.succeeded
-
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Inventario
+' ══════════════════════════════════════════════════════════════
+Producto "0..*" --> "0..1" TipoProducto
+Producto "0..*" --> "0..1" Garantia
+Producto "0..*" --> "0..1" Empaque
+Producto "0..*" --> "0..1" Descuento
+Producto "1" --> "0..*" Resena : tiene
+Producto "1" --> "0..*" Talla : define
+Producto "1" --> "0..*" Favorito : marcado
 Producto "1" --> "0..*" ReglaDisponibilidad : tiene
 
 InventarioController --> InventarioService
@@ -361,36 +612,105 @@ InventarioService --> KafkaEventProducer : publica stock.reserved
 
 KafkaEventConsumer --> InventarioService : consume order.created
 
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Pedidos
+' ══════════════════════════════════════════════════════════════
+Pedido "1" --> "1..*" PedidoItem : contiene
+Pedido "1" --> "0..*" PedidoEvento : registra
+PedidoItem "0..*" --> "1" Producto : referencia
+
+PedidosController --> PedidoService
+PedidoService --> PedidoRepository
+PedidoService --> KafkaEventProducer : publica order.created,\npayment.succeeded
+
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Entregas
+' ══════════════════════════════════════════════════════════════
 Pedido "1" --> "0..1" Entrega : genera
+Entrega "1" --> "0..*" EntregaEvento : registra
 
 EntregasController --> EntregaService
 EntregaService --> EntregaRepository
-EntregaService --> KafkaEventProducer : publica entrega.programada
+EntregaService --> KafkaEventProducer : publica entrega.programada,\nen_transito, entregada, reagendada
 
 KafkaEventConsumer --> EntregaService : consume payment.succeeded
 
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Campanas
+' ══════════════════════════════════════════════════════════════
 Campana "1" --> "1..*" Publicacion : contiene
 
 CampanasController --> CampanaService
 PublicacionesController --> PublicacionService
 CampanaService --> KafkaEventProducer : publica campana.activada
+PublicacionService --> KafkaEventProducer : publica publicacion.publicada,\npublicacion.programada
 
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – n8n-Orchestrator
+' ══════════════════════════════════════════════════════════════
+OrchestratorController --> WorkflowService
+OrchestratorController --> NotificationService
+WorkflowService --> N8nClient : proxy y trigger
+NotificationService --> N8nClient : dispatch via webhook
+EventHandlers --> WorkflowService : trigger workflows
+EventHandlers --> NotificationService : notify admins
+
+KafkaEventConsumer --> EventHandlers : consume ALL topics\n(order.created, payment.succeeded,\ninventory, entrega.*, campana.*,\npublicacion.*)
+
+N8nClient --> n8nEngine : REST API v1 + Webhooks
+
+' ══════════════════════════════════════════════════════════════
+'  Relaciones – Frontend
+' ══════════════════════════════════════════════════════════════
 Pages --> ApiClient : consume REST /api/*
-ApiClient --> UsuariosController : /api/users
-ApiClient --> InventarioController : /api/inventory
-ApiClient --> PedidosController : /api/orders
-ApiClient --> EntregasController : /api/deliveries
+Pages --> DashboardSections : admin panel
+ApiClient --> UsuariosController : /api/users/
+ApiClient --> InventarioController : /api/inventory/
+ApiClient --> PedidosController : /api/orders/
+ApiClient --> EntregasController : /api/deliveries/
+ApiClient --> CampanasController : /api/campaigns/
+ApiClient --> PublicacionesController : /api/publications/
+ApiClient --> OrchestratorController : /api/orchestrator/
+ApiClient --> ConfigTiendaController : /api/campaigns/ (config)
 
+' ══════════════════════════════════════════════════════════════
+'  Notas
+' ══════════════════════════════════════════════════════════════
 note right of Usuario
-  Cada microservicio mantiene su propia BD (Postgres)
-  y su bucket en MinIO si maneja media.
-  Eventos Kafka: order.created, payment.succeeded,
-  stock.reserved, entrega.programada, campana.activada
+  Cada microservicio tiene su propia BD PostgreSQL
+  y su bucket MinIO para archivos multimedia.
+  Comunicacion asincrona via Kafka KRaft.
+  gRPC sincrono: Pedidos -> Inventario (reserva)
+  y Pedidos -> Entregas (programar).
 end note
 
-note bottom of Pages
-  Servido por Nginx que proxea
-  /api/* a los microservicios
+note bottom of n8nEngine
+  n8n gestiona workflows de automatizacion:
+  - Notificaciones WhatsApp/Email a admins
+  - Alertas de stock bajo
+  - Publicacion en redes sociales
+  - Procesamiento post-pago
+  API Key configurada via N8N_API_KEY env var.
+  URL publica configurada via N8N_URL env var.
+end note
+
+note bottom of DashboardSections
+  Dashboard admin con 8 secciones:
+  Resumen - Pedidos - Productos - Catalogo
+  Clientes - Estadisticas - Campanas - Ajustes
+end note
+
+note left of KafkaEventProducer
+  Topics Kafka:
+  - order.created
+  - payment.succeeded
+  - stock.reserved
+  - inventory (stock updates)
+  - user.registered
+  - entrega.programada / en_transito / entregada / reagendada
+  - campana.activada
+  - publicacion.publicada / programada
 end note
 
 @enduml
+

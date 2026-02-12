@@ -48,8 +48,10 @@ import {
   Facebook,
   ImageIcon,
   Sliders,
+  Megaphone,
 } from "lucide-react"
 import { useStoreConfig } from "@/contexts/store-config-context"
+import { CampaignsSection } from "@/components/campaigns-section"
 
 const menuItems = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
@@ -58,6 +60,7 @@ const menuItems = [
   { id: "catalogo", label: "Catalogo", icon: Tag },
   { id: "clientes", label: "Clientes", icon: Users },
   { id: "estadisticas", label: "Estadisticas", icon: BarChart3 },
+  { id: "campanas", label: "Campañas", icon: Megaphone },
   { id: "ajustes", label: "Ajustes", icon: Settings },
 ]
 
@@ -1643,6 +1646,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* Campaigns Section */}
+              {activeSection === "campanas" && (
+                <CampaignsSection />
               )}
 
               {/* Settings Section */}

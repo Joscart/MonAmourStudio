@@ -1,7 +1,7 @@
-@startuml
-title Despliegue E-Commerce – Mon Amour Studio\n(Refleja docker-compose.yml real)
+﻿@startuml
+title Despliegue E-Commerce – Mon Amour Studio\n(Refleja docker-compose.yml real – 20 servicios · 8 PostgreSQL · Kafka · MinIO · n8n)
 
-' Estética
+' Estetica
 skinparam ArrowThickness 2
 skinparam componentStyle uml2
 skinparam Shadowing false
@@ -10,99 +10,119 @@ skinparam dpi 150
 node "Cliente (navegador)" as BROWSER
 
 node "Host Contenedores" as HOST {
-  folder "Docker Engine · Red: ecommerce_net (bridge)" {
+  folder "Docker Engine - Red: ecommerce_net (bridge)" {
 
-    ' ── Reverse Proxy ───────────────────────────────────────────
-    component "traefik\nTraefik v3.1 · Reverse Proxy\nHTTP :80 (exposed) · Dashboard :8080\nDocker provider · labels routing\nStripPrefix + AddPrefix middlewares" as TRAEFIK
+    ' == Reverse Proxy ================================================
+    component "traefik\nTraefik v3.1 - Reverse Proxy\nHTTP :80 - HTTPS :443 (exposed)\nDashboard :8080 (TRAEFIK_DASHBOARD_PORT)\nDocker provider - labels routing\nStripPrefix + AddPrefix middlewares\nLet's Encrypt DNS-01 (Cloudflare)\nvol: acme_data" as TRAEFIK
 
-    ' ── Frontend ────────────────────────────────────────────────
-    component "frontend\nNext.js standalone\nport 3000 (interno)" as FRONT
+    ' == Frontend =====================================================
+    component "frontend\nNext.js 14 standalone\nport 3000 (interno)\nTailwind + shadcn/ui\n8 secciones admin" as FRONT
 
-    ' ── Microservicios ──────────────────────────────────────────
+    ' == Microservicios ===============================================
     folder "Microservicio Usuarios" {
-      component "usuarios\nFastAPI · HTTP 8000\nenv: DATABASE_URL, REDIS_URL,\nJWT_SECRET, Kafka, OTLP, MinIO" as USERS_API
+      component "usuarios\nFastAPI - HTTP 8000\nenv: DATABASE_URL, REDIS_URL,\nJWT_SECRET, Kafka, OTLP, MinIO\nGoogle OAuth (GOOGLE_CLIENT_ID)" as USERS_API
       database  "postgres-usuarios\nPostgreSQL 16-alpine\nDB: usuarios\nhealthcheck: pg_isready\nvol: pg_usuarios_data" as PG_USERS
     }
 
     folder "Microservicio Inventario" {
-      component "inventario\nFastAPI · HTTP 8000 / gRPC 50052\nenv: DATABASE_URL, GRPC_PORT,\nKafka, OTLP, MinIO" as INVENTORY_API
+      component "inventario\nFastAPI - HTTP 8000 / gRPC 50052\nenv: DATABASE_URL, GRPC_PORT,\nKafka, OTLP, MinIO" as INVENTORY_API
       database  "postgres-inventario\nPostgreSQL 16-alpine\nDB: inventario\nvol: pg_inventario_data" as PG_INVENTORY
     }
 
     folder "Microservicio Pedidos" {
-      component "pedidos\nFastAPI · HTTP 8000\nenv: DATABASE_URL, JWT_SECRET,\nKafka, OTLP, MinIO" as ORDERS_API
+      component "pedidos\nFastAPI - HTTP 8000\nenv: DATABASE_URL, JWT_SECRET,\nKafka, OTLP, MinIO" as ORDERS_API
       database  "postgres-pedidos\nPostgreSQL 16-alpine\nDB: pedidos\nvol: pg_pedidos_data" as PG_ORDERS
     }
 
     folder "Microservicio Entregas" {
-      component "entregas\nFastAPI · HTTP 8000 / gRPC 50054\nenv: DATABASE_URL, GRPC_PORT,\nKafka, OTLP, MinIO" as DELIVERIES_API
+      component "entregas\nFastAPI - HTTP 8000 / gRPC 50054\nenv: DATABASE_URL, GRPC_PORT,\nKafka, OTLP, MinIO" as DELIVERIES_API
       database  "postgres-entregas\nPostgreSQL 16-alpine\nDB: entregas\nvol: pg_entregas_data" as PG_DELIVERIES
     }
 
-    folder "Microservicio Campañas" {
-      component "campanas\nFastAPI · HTTP 8000\nenv: DATABASE_URL,\nKafka, OTLP, MinIO" as CAMPAIGNS_API
+    folder "Microservicio Campanas" {
+      component "campanas\nFastAPI - HTTP 8000\nenv: DATABASE_URL,\nKafka, OTLP, MinIO\nConfiguracionTienda (store config)" as CAMPAIGNS_API
       database  "postgres-campanas\nPostgreSQL 16-alpine\nDB: campanas\nvol: pg_campanas_data" as PG_CAMPAIGNS
     }
 
-    ' ── Servicios compartidos ───────────────────────────────────
+    folder "n8n Automation" {
+      component "n8n\ndocker.n8n.io/n8nio/n8n:latest\nHTTP :5678 (interno)\nWEBHOOK_URL=N8N_URL\nDB: postgres-n8n\nvol: n8n_data" as N8N
+      database  "postgres-n8n\nPostgreSQL 16-alpine\nDB: n8n\nvol: pg_n8n_data" as PG_N8N
+    }
+
+    folder "Microservicio n8n-Orchestrator" {
+      component "n8n-orchestrator\nFastAPI - HTTP 8000\nenv: DATABASE_URL,\nN8N_BASE_URL, N8N_API_KEY,\nKafka, OTLP\nConsume ALL Kafka topics" as ORCH_API
+      database  "postgres-orchestrator\nPostgreSQL 16-alpine\nDB: orchestrator\nvol: pg_orchestrator_data" as PG_ORCH
+    }
+
+    ' == Servicios compartidos ========================================
     folder "Servicios Compartidos" {
       component "redis\nRedis 7-alpine\nvol: redis_data" as REDIS
       component "minio\nminio/minio:latest\nserver /data --console :9001\nvol: minio_data" as MINIO
       component "minio-init\nminio/mc:latest\ncrea buckets: users, inventory,\norders, deliveries, campaigns" as MINIO_INIT
     }
 
-    ' ── Event Bus ───────────────────────────────────────────────
+    ' == Event Bus ====================================================
     component "kafka\nbitnami/kafka:3.7\nKRaft (sin Zookeeper)\nPLAINTEXT :9092 / CONTROLLER :9093\nauto_create_topics=true\nvol: kafka_data" as KAFKA
 
-    ' ── Observabilidad ──────────────────────────────────────────
+    ' == Observabilidad ===============================================
     folder "Observabilidad" {
-      component "prometheus\nprom/prometheus:v2.53.0\nscrape: usuarios, inventario,\npedidos, entregas, campanas\nvol: prometheus_data" as PROM
-      component "grafana\ngrafana/grafana:11.1.0\nadmin/admin\ndatasources: Prometheus, Jaeger\nvol: grafana_data" as GRAFANA
-      component "jaeger\njaegertracing/all-in-one:1.58\nOTLP collector habilitado" as JAEGER
+      component "prometheus\nprom/prometheus:v2.53.0\nscrape: usuarios, inventario,\npedidos, entregas, campanas,\nn8n-orchestrator\nvol: prometheus_data" as PROM
+      component "grafana\ngrafana/grafana:11.1.0\nGF_ADMIN_USER / GF_ADMIN_PASSWORD\nport GRAFANA_PORT:3000 (exposed)\ndatasources: Prometheus, Jaeger\nvol: grafana_data" as GRAFANA
+      component "jaeger\njaegertracing/all-in-one:1.58\nOTLP collector habilitado\n:4317 (gRPC) :16686 (UI)" as JAEGER
     }
   }
 }
 
-' ── Acceso externo ──────────────────────────────────────────────
-BROWSER --> TRAEFIK : "HTTP :80"
-BROWSER ..> TRAEFIK : "Dashboard :8080"
+' == Acceso externo ===================================================
+BROWSER --> TRAEFIK : "HTTPS :443"
+BROWSER ..> TRAEFIK : "Dashboard\n:TRAEFIK_DASHBOARD_PORT"
+BROWSER ..> GRAFANA : "Web UI\n:GRAFANA_PORT"
 
-' ── Traefik → Frontend (catch-all, priority 1) ─────────────────
-TRAEFIK --> FRONT : "PathPrefix(`/`)\npriority 1 → :3000"
+' == Traefik -> Frontend (catch-all, priority 1) =====================
+TRAEFIK --> FRONT : "PathPrefix(`/`)\npriority 1 -> :3000"
 
-' ── Traefik → microservicios (path rewrite, priority 10) ───────
-TRAEFIK --> USERS_API      : "/api/users/ →\nStripPrefix + AddPrefix\n→ /usuarios/"
-TRAEFIK --> INVENTORY_API  : "/api/inventory/ →\nStripPrefix + AddPrefix\n→ /productos/"
-TRAEFIK --> ORDERS_API     : "/api/orders/ →\nStripPrefix + AddPrefix\n→ /pedidos/"
-TRAEFIK --> DELIVERIES_API : "/api/deliveries/ →\nStripPrefix + AddPrefix\n→ /entregas/"
-TRAEFIK --> CAMPAIGNS_API  : "/api/campaigns/ →\nStripPrefix + AddPrefix\n→ /campanas/\n/api/publications/ → /publicaciones/"
+' == Traefik -> microservicios (path rewrite, priority 10) ===========
+TRAEFIK --> USERS_API      : "/api/users/ ->\nStripPrefix + AddPrefix\n-> /usuarios/"
+TRAEFIK --> INVENTORY_API  : "/api/inventory/ ->\nStripPrefix + AddPrefix\n-> /productos/"
+TRAEFIK --> ORDERS_API     : "/api/orders/ ->\nStripPrefix + AddPrefix\n-> /pedidos/"
+TRAEFIK --> DELIVERIES_API : "/api/deliveries/ ->\nStripPrefix + AddPrefix\n-> /entregas/"
+TRAEFIK --> CAMPAIGNS_API  : "/api/campaigns/ -> /campanas/\n/api/publications/ -> /publicaciones/"
+TRAEFIK --> N8N            : "/n8n/ ->\nStripPrefix -> :5678"
+TRAEFIK --> ORCH_API       : "/api/orchestrator/ ->\nStripPrefix + AddPrefix\n-> /orchestrator/"
+TRAEFIK --> MINIO          : "/storage/ ->\nStripPrefix -> :9000"
 
-' ── gRPC sync RPC ───────────────────────────────────────────────
+' == gRPC sync RPC ====================================================
 ORDERS_API --> INVENTORY_API  : "gRPC :50052\nreservar stock"
-ORDERS_API --> DELIVERIES_API : "gRPC :50054\nprogramar envío"
+ORDERS_API --> DELIVERIES_API : "gRPC :50054\nprogramar envio"
 
-' ── Kafka event bus ─────────────────────────────────────────────
-ORDERS_API    --> KAFKA : "pub: order.created\npub: payment.succeeded"
-USERS_API     --> KAFKA : "pub: user.registered"
-INVENTORY_API --> KAFKA : "pub: stock.reserved"
-DELIVERIES_API --> KAFKA : "pub: entrega.programada"
-CAMPAIGNS_API --> KAFKA : "pub: campana.activada"
+' == Kafka event bus ==================================================
+ORDERS_API     --> KAFKA : "pub: order.created\npub: payment.succeeded"
+USERS_API      --> KAFKA : "pub: user.registered"
+INVENTORY_API  --> KAFKA : "pub: stock.reserved"
+DELIVERIES_API --> KAFKA : "pub: entrega.programada\nen_transito, entregada, reagendada"
+CAMPAIGNS_API  --> KAFKA : "pub: campana.activada\npublicacion.publicada, programada"
 
-KAFKA --> INVENTORY_API  : "sub: order.created\n→ reservar stock"
-KAFKA --> DELIVERIES_API : "sub: payment.succeeded\n→ programar envío"
-KAFKA --> CAMPAIGNS_API  : "sub: order.created,\npayment.succeeded\n→ analytics"
+KAFKA --> INVENTORY_API  : "sub: order.created\n-> reservar stock"
+KAFKA --> DELIVERIES_API : "sub: payment.succeeded\n-> programar envio"
+KAFKA --> CAMPAIGNS_API  : "sub: order.created,\npayment.succeeded\n-> analytics"
+KAFKA --> ORCH_API       : "sub: ALL topics\n-> dispatch n8n workflows\n-> notify admins"
 
-' ── Persistencia ────────────────────────────────────────────────
+' == n8n-Orchestrator -> n8n ==========================================
+ORCH_API --> N8N : "REST API v1\nhttpx + N8N_API_KEY\ntrigger webhooks"
+
+' == Persistencia =====================================================
 USERS_API      --> PG_USERS
 INVENTORY_API  --> PG_INVENTORY
 ORDERS_API     --> PG_ORDERS
 DELIVERIES_API --> PG_DELIVERIES
 CAMPAIGNS_API  --> PG_CAMPAIGNS
+N8N            --> PG_N8N
+ORCH_API       --> PG_ORCH
 
-' ── Redis (sesiones usuarios) ───────────────────────────────────
+' == Redis (sesiones usuarios) ========================================
 USERS_API --> REDIS : "cache / sesiones"
 
-' ── MinIO (Object Storage compartido) ───────────────────────────
+' == MinIO (Object Storage compartido) ================================
 MINIO_INIT --> MINIO : "mc mb buckets"
 USERS_API      --> MINIO : "bucket: users"
 INVENTORY_API  --> MINIO : "bucket: inventory"
@@ -110,52 +130,94 @@ ORDERS_API     --> MINIO : "bucket: orders"
 DELIVERIES_API --> MINIO : "bucket: deliveries"
 CAMPAIGNS_API  --> MINIO : "bucket: campaigns"
 
-' ── Observabilidad: métricas ────────────────────────────────────
+' == Observabilidad: metricas =========================================
 USERS_API      --> PROM : "/metrics"
 INVENTORY_API  --> PROM : "/metrics"
 ORDERS_API     --> PROM : "/metrics"
 DELIVERIES_API --> PROM : "/metrics"
 CAMPAIGNS_API  --> PROM : "/metrics"
+ORCH_API       --> PROM : "/metrics"
 
-' ── Observabilidad: trazas (OpenTelemetry → Jaeger OTLP) ──────
+' == Observabilidad: trazas (OpenTelemetry -> Jaeger OTLP) ===========
 USERS_API      --> JAEGER : "OTLP :4317"
 INVENTORY_API  --> JAEGER : "OTLP :4317"
 ORDERS_API     --> JAEGER : "OTLP :4317"
 DELIVERIES_API --> JAEGER : "OTLP :4317"
 CAMPAIGNS_API  --> JAEGER : "OTLP :4317"
+ORCH_API       --> JAEGER : "OTLP :4317"
 
 PROM   --> GRAFANA : "datasource"
 JAEGER --> GRAFANA : "datasource"
 
-' ── Notas ───────────────────────────────────────────────────────
+' == Notas ============================================================
 note right of KAFKA
   Kafka KRaft (sin Zookeeper).
-  Topics auto-creados: order.created,
-  payment.succeeded, stock.reserved,
-  entrega.programada, campana.activada,
-  user.registered.
+  Topics auto-creados:
+  order.created, payment.succeeded,
+  stock.reserved, inventory,
+  entrega.programada, en_transito,
+  entrega.entregada, entrega.reagendada,
+  campana.activada, publicacion.publicada,
+  publicacion.programada, user.registered.
   Replication factor = 1 (dev).
 end note
 
 note left of TRAEFIK
-  Traefik es el único punto de entrada
-  expuesto: HTTP :80 y Dashboard :8080.
+  Traefik es el unico punto de entrada
+  expuesto: HTTP :80, HTTPS :443.
+  Dashboard en :TRAEFIK_DASHBOARD_PORT.
   Enruta /api/* a los microservicios
   con middlewares StripPrefix + AddPrefix.
-  El tráfico restante (/) va a Next.js :3000.
-  Web UI de Traefik en :8080.
+  /n8n/ -> n8n UI & webhooks.
+  /storage/ -> MinIO objetos publicos.
+  El trafico restante (/) va a Next.js :3000.
+  TLS via Let's Encrypt DNS-01 (Cloudflare).
 end note
 
 note left of FRONT
-  Next.js standalone (puerto 3000 interno).
-  Sin Nginx embebido.
-  Red interna: gRPC para RPC síncrono,
-  Kafka para eventos asíncronos.
+  Next.js 14 standalone (puerto 3000 interno).
+  Paginas: Home, Products, Product[id], Cart,
+  Payment, Orders, Login, Register, Account,
+  Dashboard (admin panel 8 secciones).
+  gRPC para RPC sincrono,
+  Kafka para eventos asincronos.
 end note
 
 note bottom of MINIO
   Un solo MinIO compartido con
-  5 buckets creados por minio-init.
+  5 buckets creados por minio-init:
+  users, inventory, orders,
+  deliveries, campaigns.
+  Acceso publico: inventory, users, campaigns.
+end note
+
+note bottom of N8N
+  n8n Workflow Automation:
+  - Notificaciones WhatsApp/Email
+  - Alertas de stock bajo
+  - Publicacion en redes sociales
+  - Post-procesamiento de pagos
+  N8N_URL: URL publica para webhooks.
+  N8N_API_KEY: autenticacion API v1.
+  Base de datos propia: postgres-n8n.
+end note
+
+note right of ORCH_API
+  Orchestrator consume TODOS los
+  topics Kafka y para cada evento:
+  1. Busca workflows registrados
+     y ejecuta via n8n webhook.
+  2. Busca admins suscritos al
+     evento y notifica via n8n
+     (WhatsApp / Email).
+end note
+
+note right of GRAFANA
+  Web UI expuesta en GRAFANA_PORT
+  (default :3100).
+  Datasources provisionados:
+  Prometheus + Jaeger.
 end note
 
 @enduml
+

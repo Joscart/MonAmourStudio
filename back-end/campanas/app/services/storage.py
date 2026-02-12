@@ -29,6 +29,9 @@ ALLOWED_TYPES: dict[str, str] = {
     "image/svg+xml": ".svg",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
 }
 
 

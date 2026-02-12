@@ -20,7 +20,7 @@ services:
     ports:
       - "80:80"        # HTTP (redirige a HTTPS)
       - "443:443"      # HTTPS
-      - "8080:8080"    # Dashboard / Web UI
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Dashboard / Web UI
     environment:
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
@@ -50,6 +50,7 @@ services:
       - pedidos
       - entregas
       - campanas
+      - n8n-orchestrator
     labels:
       - "traefik.enable=true"
       # Catch-all rule: todo lo que NO sea /api/* va al frontend
@@ -238,6 +239,77 @@ services:
       - ecommerce_net
     restart: unless-stopped
 
+  # ── n8n (Workflow Automation) ────────────────────────────────
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${N8N_URL:-http://n8n:5678/}
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-n8n
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-postgres}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres-n8n:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=PathPrefix(`/n8n/`)"
+      - "traefik.http.routers.n8n.entrypoints=web,websecure"
+      - "traefik.http.routers.n8n.priority=10"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.n8n.middlewares=n8n-strip"
+      - "traefik.http.middlewares.n8n-strip.stripprefix.prefixes=/n8n"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  # ── Microservicio n8n-Orchestrator ───────────────────────────
+  n8n-orchestrator:
+    build:
+      context: ../back-end/n8n-orchestrator
+      dockerfile: Dockerfile
+    container_name: n8n-orchestrator
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-orchestrator:5432/orchestrator
+      N8N_BASE_URL: http://n8n:5678
+      N8N_API_KEY: ${N8N_API_KEY:-}
+      SERVICE_NAME: n8n-orchestrator
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator.rule=PathPrefix(`/api/orchestrator/`)"
+      - "traefik.http.routers.orchestrator.entrypoints=web,websecure"
+      - "traefik.http.routers.orchestrator.priority=10"
+      - "traefik.http.routers.orchestrator.tls=true"
+      - "traefik.http.routers.orchestrator.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.orchestrator.middlewares=orch-strip,orch-addprefix"
+      - "traefik.http.middlewares.orch-strip.stripprefix.prefixes=/api/orchestrator"
+      - "traefik.http.middlewares.orch-addprefix.addprefix.prefix=/orchestrator"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+    depends_on:
+      postgres-orchestrator:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      n8n:
+        condition: service_started
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
   # ── Bases de Datos PostgreSQL ────────────────────────────────
   postgres-usuarios:
     image: postgres:16-alpine
@@ -327,6 +399,43 @@ services:
       - ../back-end/campanas/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d campanas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-n8n:
+    image: postgres:16-alpine
+    container_name: postgres-n8n
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pg_n8n_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d n8n"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce_net
+    restart: unless-stopped
+
+  postgres-orchestrator:
+    image: postgres:16-alpine
+    container_name: postgres-orchestrator
+    environment:
+      POSTGRES_DB: orchestrator
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pg_orchestrator_data:/var/lib/postgresql/data
+      - ../back-end/n8n-orchestrator/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orchestrator"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -438,6 +547,8 @@ services:
       GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3100}:3000"   # Web UI Grafana
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -470,6 +581,9 @@ volumes:
   pg_pedidos_data:
   pg_entregas_data:
   pg_campanas_data:
+  pg_n8n_data:
+  pg_orchestrator_data:
+  n8n_data:
   redis_data:
   minio_data:
   kafka_data:
